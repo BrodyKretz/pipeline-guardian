@@ -17,6 +17,7 @@ class EventBus:
         self.lock = threading.Lock()
         self._loop = None
         self._queue = None
+        self.last_sabotage = None
         self.incident = self._empty_incident()
 
     @staticmethod
