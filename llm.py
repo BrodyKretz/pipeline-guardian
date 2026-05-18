@@ -7,13 +7,17 @@ the full agent choreography runs and is verifiable end-to-end for free.
 """
 
 import json
-import os
 import random
 from datetime import datetime
 
 from config import DATA_FILE, HEALTHY_ROW_COUNT, MODEL, SABOTAGE_TYPES
 
-USE_REAL = bool(os.getenv("ANTHROPIC_API_KEY"))
+# Always boot in MOCK, even if a key is present in the environment / .env.
+# Real Claude is strictly opt-in via the dashboard AI toggle (which sets this
+# True at runtime). This prevents a saved key from silently forcing slow,
+# paid API calls on every startup. The key itself is still used once AI is
+# explicitly enabled — anthropic.Anthropic() reads it from the environment.
+USE_REAL = False
 
 
 # --------------------------------------------------------------------------- #
