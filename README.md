@@ -1,16 +1,23 @@
 # 🛡️ Pipeline Guardian
 
-**Two AI agent systems at war over a data pipeline — and a live dashboard to watch it happen.**
+**A multi-agent self-healing system: one agent sabotages a data pipeline, five
+others detect, diagnose, repair, and verify the damage — with a live dashboard
+to watch it happen.**
 
 A **Chaos Agent** continuously sabotages an ETL pipeline. A **self-healing
-agent chain** — Monitor → Diagnosis → Patch → Validator → Reporter — detects,
+chain** — Monitor → Diagnosis → Patch → Validator → Reporter — detects,
 diagnoses, repairs, and verifies every break autonomously. A real-time
-dashboard renders all agents as nodes on a clock face with animated messages
-flowing between them as they fight.
+dashboard renders all six agents as nodes on a clock face with animated
+messages flowing between them as they fight.
 
-Every agent reasons through the Claude API via tool use. With no API key it
-falls back to a deterministic rule-based "mock brain" so the entire system
-runs, animates, and self-heals end-to-end **for free**.
+> **Read this before you judge the "AI" part — [Where the intelligence actually
+> is](#where-the-intelligence-actually-is).** Short version: these are six
+> agents in the *architectural* sense (bounded roles, isolated, communicating
+> over an event bus). Only the **two** steps that require genuine judgment —
+> Chaos's sabotage choice and Diagnosis's root-cause classification — call the
+> Claude API, and only when a key is set. The other four are deterministic by
+> design, because using an LLM where a rule is correct would be worse
+> engineering. This is a deliberate decision, not a shortcut.
 
 ---
 
@@ -77,14 +84,59 @@ healing chain fix it live.
 **Fast demo:** `DEMO_FAST=1 python main.py` shrinks the intervals
 (monitor 15s, chaos 30–60s) so a full incident plays out in under a minute.
 
+### Dashboard controls
+
+The dashboard has a live control strip — no terminal needed:
+
+- **▶ Start / ⏸ Pause / ⏹ Stop** — gate all automation (chaos *and* monitor).
+  Pause freezes everything; Stop also clears any active incident and restores
+  the baseline.
+- **MOCK / AI toggle** — switch reasoning mode at runtime. Choosing **AI** with
+  no key on file pops an inline field to paste an `ANTHROPIC_API_KEY`; it's
+  merged into `.env` (git-ignored) and applied immediately.
+
 ### Mock mode vs. real Claude
 
-- **No `ANTHROPIC_API_KEY`** → deterministic mock brain. Full system runs and
-  self-heals; diagnosis classifies from real observed signals (it never peeks
-  at which sabotage was applied), so the agent choreography is genuine.
-- **Valid `ANTHROPIC_API_KEY`** → agents reason through Claude
-  (`claude-sonnet-4-6`) via tool use. Any API error degrades gracefully back
-  to the mock path and the incident escalates rather than crashing.
+- **No `ANTHROPIC_API_KEY`** → deterministic mock brain. The full system runs
+  and self-heals. Diagnosis classifies from real observed signals only (it
+  never peeks at which sabotage was applied), so the *choreography* is genuine
+  even though no model is involved.
+- **Valid `ANTHROPIC_API_KEY`** → the two judgment steps (Chaos's sabotage
+  choice, Diagnosis's root-cause classification) reason through Claude
+  (`claude-sonnet-4-6`) via tool use. Any API error degrades gracefully back to
+  the mock path and the incident escalates rather than crashing.
+
+---
+
+## Where the intelligence actually is
+
+Be clear-eyed about what this is, because "agent" is an overloaded word.
+
+**These are six agents in the architectural sense** — six bounded roles, each
+in its own module, isolated, communicating only through the event bus and
+explicit handoffs. By the classical AI definition (perceive an environment,
+act on it toward a goal) every one qualifies, no LLM required.
+
+**Only two of them call an LLM, and only with a key set:**
+
+| Agent | Uses Claude? | Why |
+|---|---|---|
+| Chaos | ✅ (with key) | *Judgment:* which sabotage is interesting given recent history |
+| Diagnosis | ✅ (with key) | *Judgment:* infer root cause from observed signals |
+| Monitor | ❌ | Run pipeline, check a boolean — deterministic |
+| Patch | ❌ | Known failure type → known fix; a lookup, not a decision |
+| Validator | ❌ | Re-run pipeline, assert row count + schema — deterministic |
+| Reporter | ❌ | Write JSON / SQLite — deterministic |
+
+This split is **deliberate, and it's the point**. Putting an LLM behind
+Validator or Reporter would be slower, costlier, non-deterministic, and
+strictly worse than the four lines of code that do the job correctly. The
+intelligence sits exactly where genuine judgment is required and nowhere else.
+Knowing when *not* to reach for a model is the senior decision here — most
+LLM demos bolt one onto everything and become fragile for it.
+
+So: a multi-agent orchestration with LLM-backed reasoning at its two decision
+points — not "six autonomous AI minds," and it doesn't pretend to be.
 
 ---
 
@@ -102,14 +154,14 @@ agents/            chaos, monitor, diagnosis, patch, validator, reporter
 tools/             file / pipeline / log tools + Claude tool schemas
 dashboard/         single-file animated dashboard (no build step)
 incidents/         per-incident JSON + summary.json + SQLite log
-tests/             pytest suite (45 tests)
+tests/             pytest suite (56 tests)
 ```
 
 ## Testing
 
 ```bash
-pytest -q     # 45 tests: pipeline, event bus, restore, mock brain,
-              # tools, chaos, and full healing-chain e2e for all 7 sabotages
+pytest -q     # 56 tests: pipeline, event bus, restore, mock brain, tools,
+              # chaos, full healing-chain e2e (all 7 sabotages), API, controls
 ```
 
 The end-to-end chain is fully verifiable in mock mode with no API key.
