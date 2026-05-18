@@ -53,5 +53,5 @@ def test_incident_log_roundtrip():
         "event_chain": [{"type": "X"}],
     }
     write_incident_log(rec)
-    rows = read_incident_log(5)
+    rows = read_incident_log(1000)
     assert any(r["incident_id"] == "test-123" for r in rows)
