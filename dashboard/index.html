@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Pipeline Guardian</title>
+<title>Pipeline Guard</title>
 <style>
   :root{
     --bg:#0a0a0f; --panel:rgba(255,255,255,.04); --border:rgba(255,255,255,.08);
@@ -126,12 +126,11 @@
   .ok{background:rgba(48,209,88,.18);color:var(--validator)}
   .esc{background:rgba(255,45,85,.18);color:var(--chaos)}
   ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#2a2a35;border-radius:4px}
-  .legend{position:fixed;left:20px;top:68px;font-size:10px;color:var(--dim);z-index:15}
 </style>
 </head>
 <body>
   <div id="top">
-    <div class="brand">PIPELINE&nbsp;<b>GUARDIAN</b></div>
+    <div class="brand">PIPELINE&nbsp;<b>GUARD</b></div>
     <div class="stat"><span class="k">Uptime</span><span class="v" id="uptime">0s</span></div>
     <div class="stat"><span class="k">Incidents</span><span class="v" id="total">0</span></div>
     <div class="stat"><span class="k">Resolution</span><span class="v" id="rate">—</span></div>
@@ -159,8 +158,6 @@
       <span id="htxt" style="font-weight:600">HEALTHY</span>
     </div>
   </div>
-
-  <div class="legend">adversarial multi-agent self-healing demo</div>
 
   <div id="stage">
     <svg id="wires"></svg>
@@ -195,7 +192,8 @@ const RING=['chaos','monitor','diagnosis','patch','validator','reporter'];
 const stage=document.getElementById('stage');
 const svg=document.getElementById('wires');
 const nodes={};
-let startTime=Date.now();
+let uptimeSec=0;
+let runState='running';
 
 function el(tag,cls,txt){
   const e=document.createElement(tag);
@@ -302,6 +300,7 @@ function setHealth(ok){
 
 let curIncident=false;
 function handle(ev){
+  if(ev.type==='SYSTEM_RESET')resetUI();
   logEvent(ev);
   const isSab=ev.type.includes('SABOTAGE');
   wire(ev.from_agent,ev.to_agent,ev.type,
@@ -365,8 +364,8 @@ async function refreshIncidents(){
 }
 
 function tick(){
-  const s=Math.floor((Date.now()-startTime)/1000);
-  const m=Math.floor(s/60);
+  if(runState==='running')uptimeSec++;   // frozen while paused/stopped
+  const s=uptimeSec,m=Math.floor(s/60);
   document.getElementById('uptime').textContent=m?`${m}m ${s%60}s`:`${s}s`;
 }
 setInterval(tick,1000);
@@ -383,13 +382,32 @@ const keyInput=document.getElementById('keyInput');
 
 function applyStatus(s){
   if(!s)return;
+  runState=s.run_state;
+  const paused=s.run_state==='paused';
   bStart.classList.toggle('on',s.run_state==='running');
-  bPause.classList.toggle('on',s.run_state==='paused');
+  bPause.classList.toggle('on',paused);
   bStop.classList.toggle('stopped',s.run_state==='stopped');
   bStart.disabled=s.run_state==='running';
+  bPause.textContent=paused?'▶ RESUME':'⏸ PAUSE';
   const ai=s.mode==='ai';
   mAi.classList.toggle('sel',ai);
   mMock.classList.toggle('sel',!ai);
+}
+
+function resetUI(){
+  uptimeSec=0;
+  document.getElementById('logBody').replaceChildren();
+  document.getElementById('incList').replaceChildren();
+  document.getElementById('total').textContent='0';
+  document.getElementById('rate').textContent='—';
+  document.getElementById('uptime').textContent='0s';
+  document.getElementById('curBig').textContent='All systems nominal';
+  document.getElementById('curSub').textContent='';
+  document.getElementById('cur').classList.remove('act');
+  curIncident=false;
+  setHealth(true);
+  document.getElementById('burst').classList.remove('show');
+  Object.keys(nodes).forEach(n=>{setStatus(n,'idle');setLast(n,'');});
 }
 
 async function control(action){

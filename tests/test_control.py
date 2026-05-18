@@ -47,14 +47,34 @@ def test_pause_makes_monitor_job_noop(client, monkeypatch):
     assert called == [1]  # running → ran
 
 
-def test_stop_clears_active_incident(client):
+def test_pause_toggles_back_to_running(client):
+    assert client.post("/api/control/pause").json()["run_state"] == "paused"
+    # clicking pause again resumes
+    assert client.post("/api/control/pause").json()["run_state"] == "running"
+    assert client.post("/api/control/pause").json()["run_state"] == "paused"
+
+
+def test_stop_full_reset_wipes_everything(client, monkeypatch):
+    from config import INCIDENTS_DIR
+
     main.bus.start_incident("EMPTY_DATA")
-    assert main.bus.incident["active"] is True
+    main.bus.emit("chaos", "pipeline", "SABOTAGE_APPLIED", "boom")
+    main.bus.last_sabotage = "EMPTY_DATA"
+    stale = INCIDENTS_DIR / "2099-01-01_00-00-00.json"
+    stale.write_text("{}")
+    (INCIDENTS_DIR / "summary.json").write_text('{"resolved":{"X":1}}')
 
     r = client.post("/api/control/stop")
     body = r.json()
+
     assert body["run_state"] == "stopped"
     assert main.bus.incident["active"] is False
+    assert main.bus.last_sabotage is None
+    # bus.events holds only the post-reset SYSTEM_RESET event
+    assert [e["type"] for e in main.bus.events] == ["SYSTEM_RESET"]
+    assert not stale.exists()
+    assert not (INCIDENTS_DIR / "summary.json").exists()
+    assert not main.DB_FILE.exists()
 
 
 def test_unknown_control_action_400(client):

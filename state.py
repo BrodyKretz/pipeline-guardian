@@ -67,5 +67,12 @@ class EventBus:
     def close_incident(self):
         self.incident["active"] = False
 
+    def reset(self):
+        """Wipe runtime state to a clean slate. Keeps WS connections and the
+        loop/queue binding so the dashboard stays connected."""
+        self.events = []
+        self.incident = self._empty_incident()
+        self.last_sabotage = None
+
     def recent_events(self, n=50):
         return self.events[-n:]
