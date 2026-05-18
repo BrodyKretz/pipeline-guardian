@@ -17,7 +17,7 @@ def client():
 def test_root_serves_dashboard(client):
     r = client.get("/")
     assert r.status_code == 200
-    assert "Pipeline Guardian" in r.text
+    assert "Pipeline Guard" in r.text
 
 
 def test_api_state(client):

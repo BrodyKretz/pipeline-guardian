@@ -17,6 +17,7 @@ from agents.chaos_agent import run_chaos
 from config import (
     CHAOS_MAX_SEC,
     CHAOS_MIN_SEC,
+    DB_FILE,
     INCIDENTS_DIR,
     MONITOR_INTERVAL_SEC,
     ROOT,
@@ -60,6 +61,17 @@ def _write_env_key(key):
 
 def _status():
     return {"run_state": RUN_STATE, "mode": _mode(), "has_key": _has_key()}
+
+
+def _full_reset():
+    """Wipe everything back to a fresh-boot state: in-memory bus, persisted
+    incident files, summary, SQLite db, and the working files. Call under
+    bus.lock so it can't race a healing chain."""
+    bus.reset()
+    restore_all()
+    for p in INCIDENTS_DIR.glob("*.json"):  # incident files + summary.json
+        p.unlink(missing_ok=True)
+    DB_FILE.unlink(missing_ok=True)
 
 
 def _monitor_job():
@@ -109,7 +121,7 @@ async def lifespan(app: FastAPI):
     restore_all()
     init_db()
     task = asyncio.create_task(_broadcaster(queue))
-    bus.emit("system", "system", "SYSTEM_STARTED", "Pipeline Guardian online")
+    bus.emit("system", "system", "SYSTEM_STARTED", "Pipeline Guard online")
     if not os.getenv("PG_DISABLE_SCHEDULER"):
         scheduler.add_job(
             _monitor_job,
@@ -159,19 +171,22 @@ def api_control(action: str):
         RUN_STATE = "running"
         bus.emit("system", "system", "AUTOMATION_STARTED", "Automation running")
     elif action == "pause":
-        RUN_STATE = "paused"
-        bus.emit("system", "system", "AUTOMATION_PAUSED", "Automation paused")
+        # Toggle: clicking pause again resumes.
+        if RUN_STATE == "paused":
+            RUN_STATE = "running"
+            bus.emit("system", "system", "AUTOMATION_STARTED", "Automation resumed")
+        else:
+            RUN_STATE = "paused"
+            bus.emit("system", "system", "AUTOMATION_PAUSED", "Automation paused")
     elif action == "stop":
         with bus.lock:
             RUN_STATE = "stopped"
-            if bus.incident["active"]:
-                bus.close_incident()
-                restore_all()
+            _full_reset()
         bus.emit(
             "system",
             "system",
-            "AUTOMATION_STOPPED",
-            "Automation stopped; active incident cleared, baseline restored",
+            "SYSTEM_RESET",
+            "Stopped and fully reset to initial state",
         )
     else:
         return JSONResponse({"error": f"unknown action {action}"}, status_code=400)

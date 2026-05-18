@@ -1,4 +1,4 @@
-# 🛡️ Pipeline Guardian
+# 🛡️ Pipeline Guard
 
 **A multi-agent self-healing system: one agent sabotages a data pipeline, five
 others detect, diagnose, repair, and verify the damage — with a live dashboard
