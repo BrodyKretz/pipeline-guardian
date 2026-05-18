@@ -32,6 +32,36 @@
   .dot{width:11px;height:11px;border-radius:50%;background:var(--validator);
     box-shadow:0 0 12px var(--validator)}
   .dot.bad{background:var(--chaos);box-shadow:0 0 12px var(--chaos)}
+  .ctrl{display:flex;align-items:center;gap:6px}
+  .btn{
+    background:rgba(255,255,255,.05);border:1px solid var(--border);
+    color:var(--txt);font:600 11px/1 ui-monospace,monospace;
+    padding:8px 12px;border-radius:8px;cursor:pointer;letter-spacing:.5px;
+    transition:background .15s,border-color .15s,opacity .15s;
+  }
+  .btn:hover{background:rgba(255,255,255,.1)}
+  .btn.on{border-color:var(--validator);color:var(--validator);
+    box-shadow:0 0 12px rgba(48,209,88,.3)}
+  .btn.stopped{border-color:var(--chaos);color:var(--chaos)}
+  .btn:disabled{opacity:.35;cursor:default}
+  .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .seg button{
+    background:transparent;border:0;color:var(--dim);
+    font:700 11px/1 ui-monospace,monospace;padding:8px 12px;cursor:pointer;
+    letter-spacing:1px;transition:all .15s;
+  }
+  .seg button.sel{background:var(--patch);color:#fff}
+  .seg button.sel.ai{background:var(--validator)}
+  #keyRow{
+    display:none;align-items:center;gap:6px;margin-left:6px;
+  }
+  #keyRow.show{display:flex}
+  #keyInput{
+    background:rgba(0,0,0,.4);border:1px solid var(--border);color:var(--txt);
+    font:11px ui-monospace,monospace;padding:7px 9px;border-radius:7px;width:230px;
+  }
+  #keyInput:focus{outline:1px solid var(--patch)}
+  .vsep{width:1px;height:26px;background:var(--border);margin:0 4px}
   #stage{position:fixed;inset:56px 0 0 0}
   svg#wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .node{
@@ -59,15 +89,15 @@
   .node.rage{animation:rage .45s ease-in-out 5}
   #pipe{--c:var(--pipeline)}
   #burst{
-    position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
-    font-size:44px;font-weight:800;letter-spacing:3px;color:var(--chaos);
+    position:absolute;left:50%;top:6%;transform:translateX(-50%);
+    font-size:42px;font-weight:800;letter-spacing:3px;color:var(--chaos);
     text-shadow:0 0 30px var(--chaos);opacity:0;pointer-events:none;
-    transition:opacity .2s;text-align:center;
+    transition:opacity .2s;text-align:center;white-space:nowrap;z-index:5;
   }
   #burst.show{opacity:1;animation:bpop 1.6s ease-out}
-  @keyframes bpop{0%{transform:translate(-50%,-50%) scale(.6)}
-    20%{transform:translate(-50%,-50%) scale(1.1)}
-    100%{transform:translate(-50%,-50%) scale(1);opacity:0}}
+  @keyframes bpop{0%{transform:translateX(-50%) scale(.6)}
+    20%{transform:translateX(-50%) scale(1.12)}
+    100%{transform:translateX(-50%) scale(1);opacity:0}}
   .panel{
     position:fixed;background:var(--panel);border:1px solid var(--border);
     border-radius:14px;backdrop-filter:blur(10px);overflow:hidden;z-index:15;
@@ -105,6 +135,24 @@
     <div class="stat"><span class="k">Uptime</span><span class="v" id="uptime">0s</span></div>
     <div class="stat"><span class="k">Incidents</span><span class="v" id="total">0</span></div>
     <div class="stat"><span class="k">Resolution</span><span class="v" id="rate">—</span></div>
+
+    <div class="vsep"></div>
+    <div class="ctrl">
+      <button class="btn" id="bStart" title="Start / resume automation">▶ START</button>
+      <button class="btn" id="bPause" title="Pause automation">⏸ PAUSE</button>
+      <button class="btn" id="bStop" title="Stop &amp; clear incident">⏹ STOP</button>
+    </div>
+    <div class="vsep"></div>
+    <div class="seg" id="modeSeg">
+      <button id="mMock" class="sel">MOCK</button>
+      <button id="mAi" class="ai">AI</button>
+    </div>
+    <div id="keyRow">
+      <input id="keyInput" type="password" placeholder="paste ANTHROPIC_API_KEY" />
+      <button class="btn" id="keySave">SAVE</button>
+      <button class="btn" id="keyCancel">✕</button>
+    </div>
+
     <div class="health">
       <span class="k" style="font-size:10px;color:var(--dim)">PIPELINE</span>
       <span class="dot" id="hdot"></span>
@@ -324,9 +372,78 @@ function tick(){
 setInterval(tick,1000);
 refreshIncidents();setInterval(refreshIncidents,15000);
 
+// ---- automation + mode controls ----
+const bStart=document.getElementById('bStart');
+const bPause=document.getElementById('bPause');
+const bStop=document.getElementById('bStop');
+const mMock=document.getElementById('mMock');
+const mAi=document.getElementById('mAi');
+const keyRow=document.getElementById('keyRow');
+const keyInput=document.getElementById('keyInput');
+
+function applyStatus(s){
+  if(!s)return;
+  bStart.classList.toggle('on',s.run_state==='running');
+  bPause.classList.toggle('on',s.run_state==='paused');
+  bStop.classList.toggle('stopped',s.run_state==='stopped');
+  bStart.disabled=s.run_state==='running';
+  const ai=s.mode==='ai';
+  mAi.classList.toggle('sel',ai);
+  mMock.classList.toggle('sel',!ai);
+}
+
+async function control(action){
+  try{
+    const r=await fetch('/api/control/'+action,{method:'POST'});
+    applyStatus(await r.json());
+  }catch(e){}
+}
+bStart.onclick=()=>control('start');
+bPause.onclick=()=>control('pause');
+bStop.onclick=()=>control('stop');
+
+async function setMode(mode,key){
+  try{
+    const r=await fetch('/api/mode',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({mode,key:key||null})
+    });
+    const j=await r.json();
+    if(j.needs_key){            // AI requested but no key on file
+      keyRow.classList.add('show');keyInput.focus();
+      return;
+    }
+    keyRow.classList.remove('show');keyInput.value='';
+    applyStatus(j);
+  }catch(e){}
+}
+mMock.onclick=()=>setMode('mock');
+mAi.onclick=()=>setMode('ai');
+document.getElementById('keySave').onclick=()=>{
+  const k=keyInput.value.trim();
+  if(k)setMode('ai',k);
+};
+document.getElementById('keyCancel').onclick=()=>{
+  keyRow.classList.remove('show');keyInput.value='';
+};
+keyInput.addEventListener('keydown',e=>{
+  if(e.key==='Enter'){const k=keyInput.value.trim();if(k)setMode('ai',k);}
+});
+
+async function initStatus(){
+  try{applyStatus(await(await fetch('/api/state')).json());}catch(e){}
+}
+initStatus();
+
 function connect(){
   const ws=new WebSocket(`ws://${location.host}/ws`);
-  ws.onmessage=e=>handle(JSON.parse(e.data));
+  ws.onmessage=e=>{
+    const ev=JSON.parse(e.data);
+    handle(ev);
+    if(ev.type==='AUTOMATION_STARTED'||ev.type==='AUTOMATION_PAUSED'
+       ||ev.type==='AUTOMATION_STOPPED'||ev.type==='MODE_CHANGED')
+      initStatus();   // keep controls in sync across tabs
+  };
   ws.onclose=()=>setTimeout(connect,2000);
 }
 connect();
