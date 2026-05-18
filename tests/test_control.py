@@ -4,7 +4,9 @@ import pytest
 from fastapi.testclient import TestClient
 
 os.environ["PG_DISABLE_SCHEDULER"] = "1"
-os.environ.pop("ANTHROPIC_API_KEY", None)
+# Key is pinned empty in conftest before config's load_dotenv runs, so a
+# real local .env can't leak in here. Do NOT pop it (that would let
+# load_dotenv re-inject the real key on config import).
 
 import main  # noqa: E402
 from main import app  # noqa: E402

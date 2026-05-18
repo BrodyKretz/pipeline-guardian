@@ -97,14 +97,21 @@ The dashboard has a live control strip — no terminal needed:
 
 ### Mock mode vs. real Claude
 
-- **No `ANTHROPIC_API_KEY`** → deterministic mock brain. The full system runs
-  and self-heals. Diagnosis classifies from real observed signals only (it
-  never peeks at which sabotage was applied), so the *choreography* is genuine
-  even though no model is involved.
-- **Valid `ANTHROPIC_API_KEY`** → the two judgment steps (Chaos's sabotage
-  choice, Diagnosis's root-cause classification) reason through Claude
-  (`claude-sonnet-4-6`) via tool use. Any API error degrades gracefully back to
-  the mock path and the incident escalates rather than crashing.
+**The system always boots in MOCK.** Real Claude is strictly opt-in — a saved
+key never silently activates it. This keeps startup free, instant, and
+deterministic, and prevents surprise API latency/spend.
+
+- **MOCK (default)** → deterministic mock brain. The full system runs and
+  self-heals. Diagnosis classifies from real observed signals only (it never
+  peeks at which sabotage was applied), so the *choreography* is genuine even
+  though no model is involved. Incidents resolve in milliseconds.
+- **AI (opt-in via the dashboard toggle)** → the two judgment steps (Chaos's
+  sabotage choice, Diagnosis's root-cause classification) reason through Claude
+  via tool use, using the saved `ANTHROPIC_API_KEY`. Each incident now takes
+  real API time (seconds), and — by design — no new sabotage fires while an
+  incident is open, so observed sabotage spacing grows accordingly. Any API
+  error degrades gracefully back to the mock path and the incident escalates
+  rather than crashing.
 
 ---
 
