@@ -1,0 +1,7 @@
+anthropic
+fastapi
+uvicorn
+apscheduler
+python-dotenv
+requests
+pytest
