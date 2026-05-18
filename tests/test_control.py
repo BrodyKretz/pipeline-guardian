@@ -18,12 +18,44 @@ def client():
 
 @pytest.fixture(autouse=True)
 def reset():
+    saved_timing = dict(main.TIMING)
+    saved_model = main.llm.MODEL
     main.RUN_STATE = "running"
     main.llm.USE_REAL = False
     yield
     main.RUN_STATE = "running"
     main.llm.USE_REAL = False
+    main.TIMING.update(saved_timing)
+    main.llm.MODEL = saved_model
     os.environ.pop("ANTHROPIC_API_KEY", None)
+
+
+def test_timing_update_applies_and_shows_in_state(client):
+    r = client.post(
+        "/api/timing", json={"monitor": 5, "chaos_min": 10, "chaos_max": 20}
+    )
+    body = r.json()
+    assert body["timing"] == {"monitor": 5, "chaos_min": 10, "chaos_max": 20}
+    assert main.TIMING["monitor"] == 5
+    assert client.get("/api/state").json()["timing"]["chaos_max"] == 20
+
+
+def test_timing_validation(client):
+    assert client.post(
+        "/api/timing", json={"monitor": 0, "chaos_min": 1, "chaos_max": 2}
+    ).status_code == 400
+    assert client.post(
+        "/api/timing", json={"monitor": 5, "chaos_min": 99, "chaos_max": 9}
+    ).status_code == 400
+
+
+def test_model_update(client):
+    r = client.post("/api/model", json={"model": "claude-opus-4-7"})
+    assert r.json()["model"] == "claude-opus-4-7"
+    assert main.llm.MODEL == "claude-opus-4-7"
+    assert client.post(
+        "/api/model", json={"model": "gpt-4"}
+    ).status_code == 400
 
 
 def test_state_includes_status(client):

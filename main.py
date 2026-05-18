@@ -35,6 +35,14 @@ scheduler = BackgroundScheduler()
 RUN_STATE = "running"  # running | paused | stopped
 ENV_FILE = ROOT / ".env"
 
+# Runtime-tunable agent timings (defaults = whatever config resolved at boot,
+# which already honors DEMO_FAST). Editable live from the dashboard.
+TIMING = {
+    "monitor": MONITOR_INTERVAL_SEC,
+    "chaos_min": CHAOS_MIN_SEC,
+    "chaos_max": CHAOS_MAX_SEC,
+}
+
 
 def _has_key():
     return bool(os.getenv("ANTHROPIC_API_KEY"))
@@ -59,8 +67,19 @@ def _write_env_key(key):
     ENV_FILE.write_text("\n".join(lines) + "\n")
 
 
+# Curated, known-good model IDs (free-text would let a typo 404 every call).
+MODELS = ["claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"]
+
+
 def _status():
-    return {"run_state": RUN_STATE, "mode": _mode(), "has_key": _has_key()}
+    return {
+        "run_state": RUN_STATE,
+        "mode": _mode(),
+        "has_key": _has_key(),
+        "timing": TIMING,
+        "model": llm.MODEL,
+        "models": MODELS,
+    }
 
 
 def _full_reset():
@@ -90,7 +109,7 @@ def _chaos_job():
     except Exception as e:
         bus.emit("chaos", "system", "ERROR", f"chaos job failed: {e}")
     finally:
-        delay = random.randint(CHAOS_MIN_SEC, CHAOS_MAX_SEC)
+        delay = random.randint(TIMING["chaos_min"], TIMING["chaos_max"])
         scheduler.add_job(
             _chaos_job,
             "date",
@@ -126,7 +145,7 @@ async def lifespan(app: FastAPI):
         scheduler.add_job(
             _monitor_job,
             "interval",
-            seconds=MONITOR_INTERVAL_SEC,
+            seconds=TIMING["monitor"],
             id="monitor",
             max_instances=1,
             coalesce=True,
@@ -135,7 +154,9 @@ async def lifespan(app: FastAPI):
             _chaos_job,
             "date",
             run_date=datetime.now()
-            + timedelta(seconds=random.randint(CHAOS_MIN_SEC, CHAOS_MAX_SEC)),
+            + timedelta(
+                seconds=random.randint(TIMING["chaos_min"], TIMING["chaos_max"])
+            ),
             id="chaos",
         )
         scheduler.start()
@@ -213,6 +234,78 @@ def api_mode(req: ModeReq):
         return JSONResponse({"needs_key": True, **_status()})
     llm.USE_REAL = True
     bus.emit("system", "system", "MODE_CHANGED", "Switched to AI (Claude) brain")
+    return JSONResponse(_status())
+
+
+class TimingReq(BaseModel):
+    monitor: int
+    chaos_min: int
+    chaos_max: int
+
+
+@app.post("/api/timing")
+def api_timing(req: TimingReq):
+    if req.monitor < 1 or req.chaos_min < 1:
+        return JSONResponse(
+            {"error": "intervals must be >= 1 second", **_status()},
+            status_code=400,
+        )
+    if req.chaos_min > req.chaos_max:
+        return JSONResponse(
+            {"error": "chaos_min must be <= chaos_max", **_status()},
+            status_code=400,
+        )
+    TIMING.update(
+        monitor=req.monitor,
+        chaos_min=req.chaos_min,
+        chaos_max=req.chaos_max,
+    )
+    # Apply live: reschedule the monitor interval and the pending chaos run.
+    if scheduler.running:
+        try:
+            scheduler.reschedule_job(
+                "monitor", trigger="interval", seconds=TIMING["monitor"]
+            )
+            scheduler.add_job(
+                _chaos_job,
+                "date",
+                run_date=datetime.now()
+                + timedelta(
+                    seconds=random.randint(
+                        TIMING["chaos_min"], TIMING["chaos_max"]
+                    )
+                ),
+                id="chaos",
+                replace_existing=True,
+            )
+        except Exception as e:
+            bus.emit("system", "system", "ERROR", f"reschedule failed: {e}")
+    bus.emit(
+        "system",
+        "system",
+        "TIMING_CHANGED",
+        f"Monitor every {TIMING['monitor']}s · "
+        f"Chaos every {TIMING['chaos_min']}–{TIMING['chaos_max']}s",
+        dict(TIMING),
+    )
+    return JSONResponse(_status())
+
+
+class ModelReq(BaseModel):
+    model: str
+
+
+@app.post("/api/model")
+def api_model(req: ModelReq):
+    if req.model not in MODELS:
+        return JSONResponse(
+            {"error": f"unknown model {req.model}", **_status()},
+            status_code=400,
+        )
+    llm.MODEL = req.model
+    bus.emit(
+        "system", "system", "MODEL_CHANGED", f"Claude model set to {req.model}"
+    )
     return JSONResponse(_status())
 
 
