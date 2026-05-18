@@ -1,3 +1,335 @@
 <!doctype html>
-<html><head><title>Pipeline Guardian</title></head>
-<body>placeholder — replaced in T10</body></html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pipeline Guardian</title>
+<style>
+  :root{
+    --bg:#0a0a0f; --panel:rgba(255,255,255,.04); --border:rgba(255,255,255,.08);
+    --chaos:#ff2d55; --monitor:#ffd60a; --diagnosis:#ff9f0a; --patch:#0a84ff;
+    --validator:#30d158; --reporter:#bf5af0; --pipeline:#8e8e93; --system:#5e5ce6;
+    --txt:#e8e8ed; --dim:#8a8a99;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{
+    background:radial-gradient(ellipse at 50% 35%,#14141f 0%,var(--bg) 70%);
+    color:var(--txt);font:14px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;
+    overflow:hidden;
+  }
+  #top{
+    position:fixed;top:0;left:0;right:0;height:56px;display:flex;align-items:center;
+    gap:28px;padding:0 24px;background:rgba(10,10,15,.7);
+    border-bottom:1px solid var(--border);backdrop-filter:blur(12px);z-index:20;
+  }
+  #top .brand{font-weight:700;letter-spacing:.5px;font-size:16px}
+  #top .brand b{color:var(--validator)}
+  .stat{display:flex;flex-direction:column;line-height:1.2}
+  .stat .k{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:1px}
+  .stat .v{font-size:16px;font-weight:600}
+  .health{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .dot{width:11px;height:11px;border-radius:50%;background:var(--validator);
+    box-shadow:0 0 12px var(--validator)}
+  .dot.bad{background:var(--chaos);box-shadow:0 0 12px var(--chaos)}
+  #stage{position:fixed;inset:56px 0 0 0}
+  svg#wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+  .node{
+    position:absolute;width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    background:rgba(255,255,255,.03);border:2px solid var(--c);
+    transition:box-shadow .25s,transform .2s;
+  }
+  .node .ic{font-size:30px;line-height:1}
+  .node .nm{font-size:10px;letter-spacing:1.5px;margin-top:3px;color:var(--c);font-weight:700}
+  .node.big{width:118px;height:118px;margin:-59px 0 0 -59px}
+  .node.big .ic{font-size:38px}
+  .node .last{
+    position:absolute;top:104%;width:170px;text-align:center;font-size:10px;
+    color:var(--dim);left:50%;transform:translateX(-50%);
+    white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  }
+  .node.big .last{top:108%}
+  .node.idle{box-shadow:0 0 10px rgba(255,255,255,.04)}
+  .node.active{box-shadow:0 0 26px var(--c),0 0 60px var(--c);transform:scale(1.06)}
+  .node.error{box-shadow:0 0 26px var(--chaos),0 0 60px var(--chaos);
+    border-color:var(--chaos)}
+  @keyframes rage{0%,100%{box-shadow:0 0 24px var(--chaos)}
+    50%{box-shadow:0 0 60px var(--chaos),0 0 110px var(--chaos);transform:scale(1.14)}}
+  .node.rage{animation:rage .45s ease-in-out 5}
+  #pipe{--c:var(--pipeline)}
+  #burst{
+    position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);
+    font-size:44px;font-weight:800;letter-spacing:3px;color:var(--chaos);
+    text-shadow:0 0 30px var(--chaos);opacity:0;pointer-events:none;
+    transition:opacity .2s;text-align:center;
+  }
+  #burst.show{opacity:1;animation:bpop 1.6s ease-out}
+  @keyframes bpop{0%{transform:translate(-50%,-50%) scale(.6)}
+    20%{transform:translate(-50%,-50%) scale(1.1)}
+    100%{transform:translate(-50%,-50%) scale(1);opacity:0}}
+  .panel{
+    position:fixed;background:var(--panel);border:1px solid var(--border);
+    border-radius:14px;backdrop-filter:blur(10px);overflow:hidden;z-index:15;
+  }
+  .panel h3{font-size:11px;letter-spacing:2px;color:var(--dim);
+    padding:12px 16px;border-bottom:1px solid var(--border);text-transform:uppercase}
+  #log{left:20px;bottom:20px;width:430px;height:300px;display:flex;flex-direction:column}
+  #log .body{overflow-y:auto;padding:8px 12px;flex:1}
+  .ev{padding:3px 0;font-size:12px;border-left:3px solid var(--c);padding-left:8px;
+    margin-bottom:3px;opacity:0;animation:slideIn .3s forwards}
+  @keyframes slideIn{to{opacity:1}}
+  .ev .t{color:var(--dim);font-size:10px}
+  .ev .ty{color:var(--c);font-weight:700}
+  .ev .rt{color:var(--dim)}
+  #side{right:20px;bottom:20px;width:380px;height:360px;display:flex;flex-direction:column}
+  #side .body{overflow-y:auto;padding:12px 16px;flex:1}
+  .cur{padding:10px 12px;border-radius:10px;border:1px solid var(--border);
+    margin-bottom:14px;background:rgba(255,255,255,.02)}
+  .cur.act{border-color:var(--chaos);box-shadow:0 0 18px rgba(255,45,85,.25)}
+  .cur .lbl{font-size:10px;color:var(--dim);letter-spacing:1px}
+  .cur .big{font-size:18px;font-weight:700;margin-top:2px}
+  .inc{display:flex;justify-content:space-between;align-items:center;
+    padding:7px 0;border-bottom:1px solid var(--border);font-size:12px}
+  .inc .tag{padding:2px 7px;border-radius:6px;font-size:10px;font-weight:700}
+  .inc .dur{color:var(--dim)}
+  .ok{background:rgba(48,209,88,.18);color:var(--validator)}
+  .esc{background:rgba(255,45,85,.18);color:var(--chaos)}
+  ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#2a2a35;border-radius:4px}
+  .legend{position:fixed;left:20px;top:68px;font-size:10px;color:var(--dim);z-index:15}
+</style>
+</head>
+<body>
+  <div id="top">
+    <div class="brand">PIPELINE&nbsp;<b>GUARDIAN</b></div>
+    <div class="stat"><span class="k">Uptime</span><span class="v" id="uptime">0s</span></div>
+    <div class="stat"><span class="k">Incidents</span><span class="v" id="total">0</span></div>
+    <div class="stat"><span class="k">Resolution</span><span class="v" id="rate">—</span></div>
+    <div class="health">
+      <span class="k" style="font-size:10px;color:var(--dim)">PIPELINE</span>
+      <span class="dot" id="hdot"></span>
+      <span id="htxt" style="font-weight:600">HEALTHY</span>
+    </div>
+  </div>
+
+  <div class="legend">adversarial multi-agent self-healing demo</div>
+
+  <div id="stage">
+    <svg id="wires"></svg>
+    <div id="burst"></div>
+  </div>
+
+  <div class="panel" id="log">
+    <h3>Live Event Stream</h3>
+    <div class="body" id="logBody"></div>
+  </div>
+
+  <div class="panel" id="side">
+    <h3>Incident Status</h3>
+    <div class="body">
+      <div class="cur" id="cur">
+        <div class="lbl">CURRENT</div>
+        <div class="big" id="curBig">All systems nominal</div>
+        <div class="lbl" id="curSub" style="margin-top:4px"></div>
+      </div>
+      <div class="lbl" style="margin-bottom:6px">RECENT INCIDENTS</div>
+      <div id="incList"></div>
+    </div>
+  </div>
+
+<script>
+const COLORS={chaos:'#ff2d55',monitor:'#ffd60a',diagnosis:'#ff9f0a',
+  patch:'#0a84ff',validator:'#30d158',reporter:'#bf5af0',
+  pipeline:'#8e8e93',system:'#5e5ce6'};
+const ICON={chaos:'⚡',monitor:'👁',diagnosis:'🔍',patch:'🔧',
+  validator:'✓',reporter:'📋',pipeline:'⚙',system:'◆'};
+const RING=['chaos','monitor','diagnosis','patch','validator','reporter'];
+const stage=document.getElementById('stage');
+const svg=document.getElementById('wires');
+const nodes={};
+let startTime=Date.now();
+
+function el(tag,cls,txt){
+  const e=document.createElement(tag);
+  if(cls)e.className=cls;
+  if(txt!=null)e.textContent=txt;
+  return e;
+}
+
+function place(){
+  const w=stage.clientWidth,h=stage.clientHeight;
+  const cx=w/2,cy=h/2,R=Math.min(w,h)*0.33;
+  RING.forEach((name,i)=>{
+    const ang=-Math.PI/2 + i*(2*Math.PI/RING.length);
+    pos(name,cx+R*Math.cos(ang),cy+R*Math.sin(ang));
+  });
+  pos('pipeline',cx,cy);
+}
+function pos(name,x,y){
+  let n=nodes[name];
+  if(!n){
+    const d=el('div','node idle'+(name==='chaos'?' big':''));
+    if(name==='pipeline')d.id='pipe';
+    d.style.setProperty('--c',COLORS[name]);
+    d.appendChild(el('div','ic',ICON[name]));
+    d.appendChild(el('div','nm',name.toUpperCase()));
+    d.appendChild(el('div','last',''));
+    stage.appendChild(d);
+    nodes[name]=n={el:d};
+  }
+  n.el.style.left=x+'px';n.el.style.top=y+'px';
+  n.x=x;n.y=y;
+}
+window.addEventListener('resize',place);place();
+
+function setStatus(name,st){
+  const n=nodes[name];if(!n)return;
+  n.el.className='node '+st+(name==='chaos'?' big':'');
+  n.el.style.setProperty('--c',COLORS[name]);
+  clearTimeout(n.tmr);
+  if(st!=='idle')n.tmr=setTimeout(()=>setStatus(name,'idle'),2600);
+}
+function setLast(name,txt){
+  const n=nodes[name];if(!n)return;
+  n.el.querySelector('.last').textContent=txt;
+}
+
+function wire(from,to,type,color,thick){
+  const a=nodes[from],b=nodes[to];if(!a||!b)return;
+  const ns='http://www.w3.org/2000/svg';
+  const line=document.createElementNS(ns,'line');
+  line.setAttribute('x1',a.x);line.setAttribute('y1',a.y);
+  line.setAttribute('x2',b.x);line.setAttribute('y2',b.y);
+  line.setAttribute('stroke',color);
+  line.setAttribute('stroke-width',thick?6:2.5);
+  line.setAttribute('stroke-linecap','round');
+  line.setAttribute('opacity','0.85');
+  line.style.filter=`drop-shadow(0 0 6px ${color})`;
+  const dot=document.createElementNS(ns,'circle');
+  dot.setAttribute('r',thick?7:5);dot.setAttribute('fill',color);
+  dot.style.filter=`drop-shadow(0 0 8px ${color})`;
+  const lbl=document.createElementNS(ns,'text');
+  lbl.setAttribute('fill',color);lbl.setAttribute('font-size','11');
+  lbl.setAttribute('font-family','ui-monospace,monospace');
+  lbl.setAttribute('text-anchor','middle');
+  lbl.setAttribute('x',(a.x+b.x)/2);lbl.setAttribute('y',(a.y+b.y)/2-10);
+  lbl.textContent=type;
+  svg.append(line,lbl,dot);
+  const t0=performance.now(),travel=850,life=2000;
+  function step(t){
+    const e=t-t0,p=Math.min(e/travel,1);
+    dot.setAttribute('cx',a.x+(b.x-a.x)*p);
+    dot.setAttribute('cy',a.y+(b.y-a.y)*p);
+    if(e>life-500){const f=Math.max(0,(life-e)/500);
+      line.setAttribute('opacity',0.85*f);lbl.setAttribute('opacity',f);
+      dot.setAttribute('opacity',f);}
+    if(e<life)requestAnimationFrame(step);
+    else{line.remove();dot.remove();lbl.remove();}
+  }
+  requestAnimationFrame(step);
+}
+
+function logEvent(ev){
+  const body=document.getElementById('logBody');
+  const d=el('div','ev');
+  d.style.setProperty('--c',COLORS[ev.from_agent]||'#888');
+  d.appendChild(el('span','t',new Date(ev.timestamp).toLocaleTimeString()+' '));
+  d.appendChild(el('span','ty',ev.type));
+  d.appendChild(el('span','rt',` ${ev.from_agent}→${ev.to_agent}`));
+  d.appendChild(document.createElement('br'));
+  d.appendChild(el('span',null,ev.message));
+  body.prepend(d);
+  while(body.children.length>120)body.lastChild.remove();
+}
+
+function burst(txt){
+  const b=document.getElementById('burst');
+  b.textContent=txt;b.classList.remove('show');void b.offsetWidth;
+  b.classList.add('show');
+}
+function setHealth(ok){
+  document.getElementById('hdot').className='dot'+(ok?'':' bad');
+  document.getElementById('htxt').textContent=ok?'HEALTHY':'DEGRADED';
+}
+
+let curIncident=false;
+function handle(ev){
+  logEvent(ev);
+  const isSab=ev.type.includes('SABOTAGE');
+  wire(ev.from_agent,ev.to_agent,ev.type,
+       COLORS[ev.from_agent]||'#888',
+       isSab && ev.to_agent==='pipeline');
+  setStatus(ev.from_agent,
+    /ERROR|ESCALATE|FAIL|FAILURE/.test(ev.type)?'error':'active');
+  setLast(ev.from_agent,ev.type);
+
+  if(isSab){
+    nodes.chaos.el.classList.add('rage');
+    setTimeout(()=>nodes.chaos.el.classList.remove('rage'),2400);
+    burst((ev.data&&ev.data.sabotage)||'CHAOS');
+  }
+  if(ev.type==='FAILURE_DETECTED'){
+    setHealth(false);curIncident=true;
+    const c=document.getElementById('cur');c.classList.add('act');
+    document.getElementById('curBig').textContent='INCIDENT ACTIVE';
+    document.getElementById('curSub').textContent=ev.message;
+  }
+  if(ev.type==='PIPELINE_HEALTHY'){
+    setHealth(true);
+    if(!curIncident){
+      document.getElementById('curBig').textContent='All systems nominal';
+      document.getElementById('curSub').textContent=ev.message;
+    }
+  }
+  if(ev.type==='INCIDENT_CLOSED'){
+    curIncident=false;setHealth(true);
+    document.getElementById('cur').classList.remove('act');
+    const ok=ev.data&&ev.data.resolved;
+    document.getElementById('curBig').textContent=
+      ok?'Last incident RESOLVED':'Last incident ESCALATED';
+    document.getElementById('curSub').textContent=ev.message;
+    refreshIncidents();
+  }
+}
+
+async function refreshIncidents(){
+  try{
+    const r=await fetch('/api/incidents');const j=await r.json();
+    const s=j.summary||{resolved:{},escalated:{}};
+    const res=Object.values(s.resolved||{}).reduce((a,b)=>a+b,0);
+    const esc=Object.values(s.escalated||{}).reduce((a,b)=>a+b,0);
+    const tot=res+esc;
+    document.getElementById('total').textContent=tot;
+    document.getElementById('rate').textContent=
+      tot?Math.round(100*res/tot)+'%':'—';
+    const list=document.getElementById('incList');
+    list.replaceChildren();
+    (j.recent||[]).slice(0,5).forEach(i=>{
+      const row=el('div','inc');
+      const left=el('span',null,(i.failure_type||'?')+' ');
+      left.appendChild(el('span','dur',(i.duration_seconds||0)+'s'));
+      const tag=el('span','tag '+(i.resolved?'ok':'esc'),
+        i.resolved?'RESOLVED':'ESCALATED');
+      row.appendChild(left);row.appendChild(tag);
+      list.appendChild(row);
+    });
+  }catch(e){}
+}
+
+function tick(){
+  const s=Math.floor((Date.now()-startTime)/1000);
+  const m=Math.floor(s/60);
+  document.getElementById('uptime').textContent=m?`${m}m ${s%60}s`:`${s}s`;
+}
+setInterval(tick,1000);
+refreshIncidents();setInterval(refreshIncidents,15000);
+
+function connect(){
+  const ws=new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage=e=>handle(JSON.parse(e.data));
+  ws.onclose=()=>setTimeout(connect,2000);
+}
+connect();
+</script>
+</body>
+</html>
