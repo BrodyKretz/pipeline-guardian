@@ -9,7 +9,9 @@ import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel
 
+import llm
 from agents import monitor_agent
 from agents.chaos_agent import run_chaos
 from config import (
@@ -27,8 +29,42 @@ from state import EventBus
 bus = EventBus()
 scheduler = BackgroundScheduler()
 
+# Automation run-state. Jobs stay scheduled but no-op unless "running",
+# so pause/resume is instant and never tears down the scheduler.
+RUN_STATE = "running"  # running | paused | stopped
+ENV_FILE = ROOT / ".env"
+
+
+def _has_key():
+    return bool(os.getenv("ANTHROPIC_API_KEY"))
+
+
+def _mode():
+    return "ai" if llm.USE_REAL else "mock"
+
+
+def _write_env_key(key):
+    """Merge ANTHROPIC_API_KEY into .env, preserving any other lines."""
+    lines, found = [], False
+    if ENV_FILE.exists():
+        for ln in ENV_FILE.read_text().splitlines():
+            if ln.startswith("ANTHROPIC_API_KEY="):
+                lines.append(f"ANTHROPIC_API_KEY={key}")
+                found = True
+            else:
+                lines.append(ln)
+    if not found:
+        lines.append(f"ANTHROPIC_API_KEY={key}")
+    ENV_FILE.write_text("\n".join(lines) + "\n")
+
+
+def _status():
+    return {"run_state": RUN_STATE, "mode": _mode(), "has_key": _has_key()}
+
 
 def _monitor_job():
+    if RUN_STATE != "running":
+        return
     try:
         monitor_agent.tick(bus)
     except Exception as e:  # never let a job crash the scheduler
@@ -37,7 +73,8 @@ def _monitor_job():
 
 def _chaos_job():
     try:
-        run_chaos(bus)
+        if RUN_STATE == "running":
+            run_chaos(bus)
     except Exception as e:
         bus.emit("chaos", "system", "ERROR", f"chaos job failed: {e}")
     finally:
@@ -107,8 +144,61 @@ def dashboard():
 @app.get("/api/state")
 def api_state():
     return JSONResponse(
-        {"incident": bus.incident, "events": bus.recent_events(50)}
+        {
+            "incident": bus.incident,
+            "events": bus.recent_events(50),
+            **_status(),
+        }
     )
+
+
+@app.post("/api/control/{action}")
+def api_control(action: str):
+    global RUN_STATE
+    if action == "start":
+        RUN_STATE = "running"
+        bus.emit("system", "system", "AUTOMATION_STARTED", "Automation running")
+    elif action == "pause":
+        RUN_STATE = "paused"
+        bus.emit("system", "system", "AUTOMATION_PAUSED", "Automation paused")
+    elif action == "stop":
+        with bus.lock:
+            RUN_STATE = "stopped"
+            if bus.incident["active"]:
+                bus.close_incident()
+                restore_all()
+        bus.emit(
+            "system",
+            "system",
+            "AUTOMATION_STOPPED",
+            "Automation stopped; active incident cleared, baseline restored",
+        )
+    else:
+        return JSONResponse({"error": f"unknown action {action}"}, status_code=400)
+    return JSONResponse(_status())
+
+
+class ModeReq(BaseModel):
+    mode: str
+    key: str | None = None
+
+
+@app.post("/api/mode")
+def api_mode(req: ModeReq):
+    if req.mode == "mock":
+        llm.USE_REAL = False
+        bus.emit("system", "system", "MODE_CHANGED", "Switched to MOCK brain")
+        return JSONResponse(_status())
+    # mode == "ai"
+    if req.key and req.key.strip():
+        key = req.key.strip()
+        _write_env_key(key)
+        os.environ["ANTHROPIC_API_KEY"] = key
+    if not _has_key():
+        return JSONResponse({"needs_key": True, **_status()})
+    llm.USE_REAL = True
+    bus.emit("system", "system", "MODE_CHANGED", "Switched to AI (Claude) brain")
+    return JSONResponse(_status())
 
 
 @app.get("/api/incidents")
