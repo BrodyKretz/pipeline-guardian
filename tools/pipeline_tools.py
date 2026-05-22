@@ -1,33 +1,59 @@
-import importlib
 import json
+import subprocess
+import sys
 
-from config import OUTPUT_FILE, PIPELINE_FILE
-from restore import restore_data_only
+import config
+from config import OUTPUT_FILE, ROOT
+
+# Run pipeline.run() in a fresh subprocess so AI-generated code (possible
+# infinite loops, syntax errors, crashes) can never wedge the server. The
+# subprocess prints the result dict as a single JSON line on stdout.
+_RUNNER = (
+    "import json,sys\n"
+    "try:\n"
+    "    import pipeline\n"
+    "    print('PGRESULT'+json.dumps(pipeline.run()))\n"
+    "except Exception as e:\n"
+    "    print('PGRESULT'+json.dumps({'success':False,'rows_processed':0,"
+    "'error':str(e),'error_type':type(e).__name__}))\n"
+)
+
+
+def _fail(error, error_type):
+    return {
+        "success": False,
+        "rows_processed": 0,
+        "error": error,
+        "error_type": error_type,
+    }
 
 
 def run_pipeline():
-    """Reload pipeline.py from disk (picks up live patches) and run it."""
-    import pipeline
+    """Execute pipeline.run() in a timeout-bounded subprocess; return its result."""
+    timeout = config.PIPELINE_TIMEOUT_SEC
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-c", _RUNNER],
+            cwd=str(ROOT),
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired:
+        return _fail(f"pipeline exceeded {timeout}s", "Timeout")
+    for line in proc.stdout.splitlines():
+        if line.startswith("PGRESULT"):
+            return json.loads(line[len("PGRESULT") :])
+    return _fail(proc.stderr.strip() or "no result emitted", "RunnerError")
 
-    importlib.reload(pipeline)
-    return pipeline.run()
+
+def dry_run_pipeline():
+    """Run the pipeline and return the structured result (used by agents to
+    test a candidate fix). Output file is overwritten; validator re-runs anyway."""
+    return run_pipeline()
 
 
 def get_last_output():
     if not OUTPUT_FILE.exists():
         return None
     return json.loads(OUTPUT_FILE.read_text())
-
-
-def restore_data_file():
-    restore_data_only()
-    return "weather_source.json restored from baseline"
-
-
-def rewrite_pipeline_section(old_code, new_code):
-    """Targeted str-replace edit of pipeline.py. Errors if `old_code` absent."""
-    src = PIPELINE_FILE.read_text()
-    if old_code not in src:
-        raise ValueError("old_code not found in pipeline.py")
-    PIPELINE_FILE.write_text(src.replace(old_code, new_code, 1))
-    return "pipeline.py section rewritten"

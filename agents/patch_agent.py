@@ -4,8 +4,19 @@ Patches always operate on the pristine baseline pipeline.py (restored after
 every incident), so the string-replacement targets are deterministic.
 """
 
-from config import CONF_DIRECT, CONF_UNVERIFIED
-from tools.pipeline_tools import restore_data_file, rewrite_pipeline_section
+from config import CONF_DIRECT, CONF_UNVERIFIED, PIPELINE_FILE
+from restore import restore_data_only
+
+
+def restore_data_file():
+    restore_data_only()
+
+
+def rewrite_pipeline_section(old_code, new_code):
+    src = PIPELINE_FILE.read_text()
+    if old_code not in src:
+        raise ValueError("old_code not found in pipeline.py")
+    PIPELINE_FILE.write_text(src.replace(old_code, new_code, 1))
 
 _SCHEMA_OLD = (
     'temp_c = round((float(rec["temp"]) - 32) * 5.0 / 9.0, 2)\n'
