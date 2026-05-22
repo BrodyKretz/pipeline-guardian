@@ -166,3 +166,36 @@ def test_ai_validator_judges(monkeypatch):
     monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
     bus = EventBus()
     assert validator_agent.run(bus) is True
+
+
+def test_ai_chain_retries_patch_once_then_escalates(monkeypatch):
+    from agents import monitor_agent
+
+    calls = {"patch": 0, "validate": 0}
+    monkeypatch.setattr(
+        "agents.diagnosis_agent.diagnose",
+        lambda e: {
+            "failure_type": "x",
+            "confidence": 0.9,
+            "reasoning": "r",
+            "suggested_fix": "f",
+        },
+    )
+
+    def fake_patch(bus, diag, feedback=None):
+        calls["patch"] += 1
+        bus.emit("patch", "validator", "PATCH_APPLIED", "tried")
+        return {"fix": "tried"}
+
+    monkeypatch.setattr("agents.patch_agent.run", fake_patch)
+
+    def fake_validate(bus):
+        calls["validate"] += 1
+        return False  # always fails
+
+    monkeypatch.setattr("agents.validator_agent.run", fake_validate)
+    bus = EventBus()
+    monitor_agent._run_chain(bus, "err")
+    assert calls["patch"] == 2  # original + one retry
+    closed = [e for e in bus.events if e["type"] == "INCIDENT_CLOSED"][0]
+    assert closed["data"]["resolved"] is False

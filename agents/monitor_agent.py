@@ -1,6 +1,7 @@
 """Monitor Agent — periodically runs the pipeline and drives the healing
 chain synchronously when a failure (or row-count anomaly) is detected."""
 
+import llm
 from config import HEALTHY_ROW_COUNT
 from tools.pipeline_tools import run_pipeline
 
@@ -21,6 +22,11 @@ def _run_chain(bus, error):
         )
         return
     passed = validator_agent.run(bus)
+    if not passed and llm.USE_REAL:
+        patch_res = patch_agent.run(
+            bus, diag, feedback="previous fix failed validation"
+        )
+        passed = validator_agent.run(bus)
     reporter_agent.run(bus, resolved=passed, diag=diag, fix=patch_res["fix"])
 
 
