@@ -4,8 +4,10 @@ Patches always operate on the pristine baseline pipeline.py (restored after
 every incident), so the string-replacement targets are deterministic.
 """
 
-from config import CONF_DIRECT, CONF_UNVERIFIED, PIPELINE_FILE
+import llm
+from config import CONF_DIRECT, CONF_UNVERIFIED, DATA_FILE, PIPELINE_FILE, WRITABLE_FILES
 from restore import restore_data_only
+from tools.file_events import emit_file_change, track_changes
 
 
 def restore_data_file():
@@ -67,7 +69,27 @@ def _apply_fix(failure_type):
     raise ValueError(f"no patch strategy for {failure_type}")
 
 
-def run(bus, diag):
+def _ai_patch(bus, diag, feedback=None):
+    """Generative branch: the model reads the files and writes the fix itself."""
+
+    def write_fn(path_str, content):
+        target = next(
+            (p for p in WRITABLE_FILES if str(p).endswith(path_str)), None
+        )
+        if target is None:
+            return f"refused: {path_str} not writable"
+        before = target.read_text() if target.exists() else None
+        target.write_text(content)
+        emit_file_change(bus, "patch", "heal", target, before, content)
+        return f"wrote {len(content)} chars to {path_str}"
+
+    out = llm.generate_patch(diag, write_fn, feedback)
+    summary = out.get("summary", "patch applied")
+    bus.emit("patch", "validator", "PATCH_APPLIED", summary, {"fix": summary})
+    return {"fix": summary}
+
+
+def run(bus, diag, feedback=None):
     ft = diag["failure_type"]
     conf = diag["confidence"]
     bus.emit(
@@ -87,7 +109,11 @@ def run(bus, diag):
         )
         return {"escalated": True}
 
-    fix_desc = _apply_fix(ft)
+    if llm.USE_REAL:
+        return _ai_patch(bus, diag, feedback)
+
+    with track_changes(bus, "patch", "heal", [DATA_FILE, PIPELINE_FILE]):
+        fix_desc = _apply_fix(ft)
     unverified = conf < CONF_DIRECT
     label = fix_desc + (" [UNVERIFIED]" if unverified else "")
     bus.emit(
