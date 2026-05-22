@@ -199,3 +199,39 @@ def test_ai_chain_retries_patch_once_then_escalates(monkeypatch):
     assert calls["patch"] == 2  # original + one retry
     closed = [e for e in bus.events if e["type"] == "INCIDENT_CLOSED"][0]
     assert closed["data"]["resolved"] is False
+
+
+def test_read_tools_never_leak_attribution(monkeypatch):
+    seen = []
+    real_loop = llm._anthropic_tool_loop
+
+    def spy_loop(system, user, tools, executor, final_tool, max_turns=8):
+        def wrapped(n, i):
+            r = executor(n, i)
+            seen.append(r)
+            return r
+
+        return real_loop(system, user, tools, wrapped, final_tool, max_turns)
+
+    monkeypatch.setattr(llm, "_anthropic_tool_loop", spy_loop)
+    script = [
+        FakeResp([FakeBlock("read_data", {})]),
+        FakeResp(
+            [
+                FakeBlock(
+                    "submit_diagnosis",
+                    {
+                        "failure_type": "x",
+                        "confidence": 0.9,
+                        "reasoning": "r",
+                        "suggested_fix": "f",
+                    },
+                )
+            ]
+        ),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    llm.diagnose("err")
+    blob = str(seen)
+    for forbidden in ("kind", "damage", "heal", "#ff2d55", "color"):
+        assert forbidden not in blob
