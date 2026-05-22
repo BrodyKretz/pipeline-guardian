@@ -138,6 +138,20 @@
   .inc .dur{color:var(--dim)}
   .ok{background:rgba(48,209,88,.18);color:var(--validator)}
   .esc{background:rgba(255,45,85,.18);color:var(--chaos)}
+  #files{position:fixed;inset:56px 0 0 0;display:flex;flex-direction:column;
+    padding:16px 24px;gap:12px;z-index:10}
+  #fileTabs{display:flex;gap:8px;flex-wrap:wrap}
+  #fileTabs button{background:rgba(255,255,255,.05);border:1px solid var(--border);
+    color:var(--dim);font:700 11px ui-monospace,monospace;padding:8px 14px;
+    border-radius:8px;cursor:pointer;letter-spacing:.5px}
+  #fileTabs button.sel{color:var(--txt);border-color:var(--patch)}
+  #fileView{flex:1;overflow:auto;background:rgba(0,0,0,.35);
+    border:1px solid var(--border);border-radius:12px;padding:16px 18px;
+    font:13px/1.55 ui-monospace,monospace;white-space:pre;color:var(--dim);margin:0}
+  #fileView .empty{color:var(--dim);opacity:.6}
+  .ln{display:block;border-radius:3px;padding:0 4px}
+  .ln.damage{color:#ff5b73;background:rgba(255,45,85,.12)}
+  .ln.heal{background:rgba(255,255,255,.05)}
   ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-thumb{background:#2a2a35;border-radius:4px}
 </style>
 </head>
@@ -159,6 +173,10 @@
       <button id="mMock" class="sel">MOCK</button>
       <button id="mAi" class="ai">AI</button>
     </div>
+    <div class="seg" id="viewSeg">
+      <button id="vGraph" class="sel">GRAPH</button>
+      <button id="vFiles">FILES</button>
+    </div>
     <div id="keyRow">
       <input id="keyInput" type="password" placeholder="paste ANTHROPIC_API_KEY" />
       <button class="btn" id="keySave">SAVE</button>
@@ -175,6 +193,11 @@
   <div id="stage">
     <svg id="wires"></svg>
     <div id="burst"></div>
+  </div>
+
+  <div id="files" style="display:none">
+    <div id="fileTabs"></div>
+    <pre id="fileView"></pre>
   </div>
 
   <div class="panel" id="cfg">
@@ -224,6 +247,58 @@ const svg=document.getElementById('wires');
 const nodes={};
 let uptimeSec=0;
 let runState='running';
+
+// ---- file viewer (Phase 2) ----
+const fileState={};        // path -> {lines:[{text,cls,color}]}
+let activeFile=null;
+let fileChangeAgent='chaos';
+
+function showView(v){
+  const files=v==='files';
+  document.getElementById('files').style.display=files?'flex':'none';
+  document.getElementById('stage').style.display=files?'none':'block';
+  document.getElementById('vFiles').classList.toggle('sel',files);
+  document.getElementById('vGraph').classList.toggle('sel',!files);
+}
+
+function ensureTab(path){
+  if(fileState[path])return;
+  fileState[path]={lines:[]};
+  const b=document.createElement('button');
+  b.textContent=path;
+  b.onclick=()=>{
+    activeFile=path;renderFile();
+    [...document.getElementById('fileTabs').children]
+      .forEach(c=>c.classList.toggle('sel',c.textContent===path));
+  };
+  document.getElementById('fileTabs').appendChild(b);
+  if(!activeFile){activeFile=path;b.classList.add('sel');}
+}
+
+function renderFile(){
+  const view=document.getElementById('fileView');
+  view.replaceChildren();
+  const st=fileState[activeFile];
+  if(!st){view.appendChild(el('span','empty','no files changed yet'));return;}
+  st.lines.forEach(l=>{
+    const span=el('span','ln'+(l.cls?(' '+l.cls):''),l.text+'\n');
+    if(l.color)span.style.color=l.color;
+    view.appendChild(span);
+  });
+}
+
+function applyFileChange(d){
+  ensureTab(d.path);
+  const before=(d.before==null?'':d.before).split('\n');
+  const after=(d.after==null?'':d.after).split('\n');
+  const cls=d.kind==='damage'?'damage':(d.kind==='restore'?'':'heal');
+  const color=d.kind==='heal'?(COLORS[fileChangeAgent]||null):null;
+  fileState[d.path].lines=after.map((text,i)=>{
+    const changed=before[i]!==text;
+    return changed?{text,cls,color}:{text,cls:'',color:null};
+  });
+  if(activeFile===d.path||activeFile==null){activeFile=d.path;renderFile();}
+}
 
 function el(tag,cls,txt){
   const e=document.createElement(tag);
@@ -331,6 +406,11 @@ function setHealth(ok){
 let curIncident=false;
 function handle(ev){
   if(ev.type==='SYSTEM_RESET')resetUI();
+  if(ev.type==='FILE_CHANGED'){
+    fileChangeAgent=ev.from_agent;
+    applyFileChange(ev.data);
+    return;   // file events drive the viewer, not the agent graph
+  }
   logEvent(ev);
   const isSab=ev.type.includes('SABOTAGE');
   wire(ev.from_agent,ev.to_agent,ev.type,
@@ -483,6 +563,10 @@ function resetUI(){
   setHealth(true);
   document.getElementById('burst').classList.remove('show');
   Object.keys(nodes).forEach(n=>{setStatus(n,'idle');setLast(n,'');});
+  Object.keys(fileState).forEach(k=>delete fileState[k]);
+  activeFile=null;
+  document.getElementById('fileTabs').replaceChildren();
+  document.getElementById('fileView').replaceChildren();
 }
 
 async function control(action){
@@ -494,6 +578,8 @@ async function control(action){
 bStart.onclick=()=>control('start');
 bPause.onclick=()=>control('pause');
 bStop.onclick=()=>control('stop');
+document.getElementById('vGraph').onclick=()=>showView('graph');
+document.getElementById('vFiles').onclick=()=>showView('files');
 
 async function setMode(mode,key){
   try{
