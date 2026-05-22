@@ -151,7 +151,13 @@ def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_tur
 # never attribution/colors/baseline, so the model stays blind to the overlay.
 # --------------------------------------------------------------------------- #
 from config import PIPELINE_FILE  # noqa: E402
-from tools.schemas import CHAOS_TOOLS  # noqa: E402
+from tools.pipeline_tools import dry_run_pipeline, get_last_output  # noqa: E402
+from tools.schemas import (  # noqa: E402
+    CHAOS_TOOLS,
+    DIAGNOSE_TOOLS,
+    PATCH_TOOLS,
+    VALIDATE_TOOLS,
+)
 
 
 def _read_tool(name):
@@ -236,49 +242,15 @@ def diagnose(pipeline_error):
             "suggested_fix": _FIX_PLANS.get(ftype, "Escalate to a human."),
         }
     try:
-        tools = [
-            {
-                "name": "inspect_data",
-                "description": "Get observable facts about the data file.",
-                "input_schema": {"type": "object", "properties": {}},
-            },
-            {
-                "name": "submit_diagnosis",
-                "description": "Submit the final root-cause classification.",
-                "input_schema": {
-                    "type": "object",
-                    "properties": {
-                        "failure_type": {
-                            "type": "string",
-                            "enum": SABOTAGE_TYPES + ["UNKNOWN"],
-                        },
-                        "confidence": {"type": "number"},
-                        "reasoning": {"type": "string"},
-                        "suggested_fix": {"type": "string"},
-                    },
-                    "required": [
-                        "failure_type",
-                        "confidence",
-                        "reasoning",
-                        "suggested_fix",
-                    ],
-                },
-            },
-        ]
-
-        def executor(name, _inp):
-            if name == "inspect_data":
-                return state
-            return {"error": "unknown tool"}
-
         return _anthropic_tool_loop(
-            "You diagnose data-pipeline failures. Use inspect_data, then "
-            "classify the root cause and submit_diagnosis. Do not guess; base "
-            "the classification on observed signals only.",
+            "You diagnose data-pipeline failures. Read the data and the "
+            "pipeline source, reason about the root cause in your own words, "
+            "then submit_diagnosis. `failure_type` is a short free-text label "
+            "you choose (not from a fixed list). Base it on what you observe.",
             f"The pipeline failed with error:\n{pipeline_error}\n\n"
-            "Investigate and submit your diagnosis.",
-            tools,
-            executor,
+            "Investigate the files and submit your diagnosis.",
+            DIAGNOSE_TOOLS,
+            lambda name, _inp: _read_tool(name),
             "submit_diagnosis",
         )
     except Exception as e:
@@ -289,6 +261,51 @@ def diagnose(pipeline_error):
             "reasoning": f"[mock fallback after API error: {e}] {reason}",
             "suggested_fix": _FIX_PLANS.get(ftype, "Escalate to a human."),
         }
+
+
+def generate_patch(diag, write_fn, feedback=None):
+    """Drive Claude to read files and write a fix. `write_fn(path, content)`
+    performs the attributed heal write and returns a plain string. Returns
+    {"summary": str}."""
+
+    def executor(name, inp):
+        if name == "write_file":
+            return write_fn(inp["path"], inp["content"])
+        if name == "dry_run":
+            return dry_run_pipeline()
+        return _read_tool(name)
+
+    extra = f"\nA previous attempt failed validation: {feedback}" if feedback else ""
+    return _anthropic_tool_loop(
+        "You repair a broken weather ETL. Read the data and pipeline, find the "
+        "fault, and WRITE a fix (to the data and/or pipeline.py) so the pipeline "
+        "produces clean, consistent rows. You may dry_run to check your fix. Do "
+        "not assume any reference or baseline exists — reason from the files." + extra,
+        f"Diagnosis: {diag.get('reasoning', '')}. Fix it, then submit_patch.",
+        PATCH_TOOLS,
+        executor,
+        "submit_patch",
+    )
+
+
+def judge_output():
+    """AI validator: run the pipeline, judge whether output is clean data.
+    Returns {"passed": bool, "reasoning": str}."""
+
+    def executor(name, _inp):
+        if name == "run_output":
+            return {"result": dry_run_pipeline(), "output": get_last_output()}
+        return _read_tool(name)
+
+    return _anthropic_tool_loop(
+        "You validate a weather ETL's output. Run it via run_output, then judge "
+        "whether the output is clean, internally-consistent data (uniform keys, "
+        "consistent types, sane row count, no nulls). Submit your judgment.",
+        "Validate the current pipeline output.",
+        VALIDATE_TOOLS,
+        executor,
+        "submit_judgment",
+    )
 
 
 def plan_patch(failure_type):

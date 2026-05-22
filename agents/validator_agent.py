@@ -1,5 +1,6 @@
 """Validator Agent — re-runs the pipeline and confirms the fix worked."""
 
+import llm
 from config import HEALTHY_ROW_COUNT
 from tools.pipeline_tools import get_last_output, run_pipeline
 
@@ -21,6 +22,14 @@ def _schema_ok():
 
 def run(bus):
     bus.emit("validator", "patch", "VALIDATION_STARTED", "Re-running pipeline")
+    if llm.USE_REAL:
+        out = llm.judge_output()
+        ok = bool(out.get("passed"))
+        ev = "VALIDATION_PASSED" if ok else "VALIDATION_FAILED"
+        bus.emit("validator", "reporter", ev, out.get("reasoning", ""), out)
+        if not ok:
+            bus.emit("validator", "system", "ESCALATE", "Fix did not resolve.")
+        return ok
     r = run_pipeline()
     ok = (
         r["success"]

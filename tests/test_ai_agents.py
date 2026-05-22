@@ -100,3 +100,69 @@ def test_ai_chaos_rejects_non_whitelisted_path(monkeypatch):
     bus = EventBus()
     run_chaos(bus)  # must not raise, must not write
     assert "x=1" not in pathlib.Path("llm.py").read_text()
+
+
+def test_ai_diagnose_returns_freeform_shape(monkeypatch):
+    script = [
+        FakeResp([FakeBlock("read_data", {})]),
+        FakeResp(
+            [
+                FakeBlock(
+                    "submit_diagnosis",
+                    {
+                        "failure_type": "schema keys renamed",
+                        "confidence": 0.9,
+                        "reasoning": "temp->temperature",
+                        "suggested_fix": "read both keys",
+                    },
+                )
+            ]
+        ),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    d = llm.diagnose("KeyError: temp")
+    assert d["confidence"] == 0.9
+    assert d["failure_type"] == "schema keys renamed"  # free text, not enum
+
+
+def test_ai_patch_writes_heal_via_track(monkeypatch):
+    from agents import patch_agent
+    from config import PIPELINE_FILE
+
+    good = PIPELINE_FILE.read_text()
+    script = [
+        FakeResp([FakeBlock("read_pipeline", {})]),
+        FakeResp([FakeBlock("write_file", {"path": "pipeline.py", "content": good})]),
+        FakeResp([FakeBlock("submit_patch", {"summary": "rewrote transform"})]),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    res = patch_agent.run(
+        bus,
+        {"failure_type": "x", "confidence": 0.9, "reasoning": "r", "suggested_fix": "f"},
+    )
+    assert res["fix"]
+    heals = [
+        e
+        for e in bus.events
+        if e["type"] == "FILE_CHANGED" and e["data"]["kind"] == "heal"
+    ]
+    assert len(heals) == 1
+
+
+def test_ai_validator_judges(monkeypatch):
+    from agents import validator_agent
+
+    script = [
+        FakeResp(
+            [
+                FakeBlock(
+                    "submit_judgment",
+                    {"passed": True, "reasoning": "clean 20-row table"},
+                )
+            ]
+        )
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    assert validator_agent.run(bus) is True
