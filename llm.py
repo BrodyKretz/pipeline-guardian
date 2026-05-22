@@ -105,10 +105,14 @@ _FIX_PLANS = {
 # --------------------------------------------------------------------------- #
 # Real Claude tool-use loop
 # --------------------------------------------------------------------------- #
-def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_turns=8):
+def _make_client():
     import anthropic
 
-    client = anthropic.Anthropic()
+    return anthropic.Anthropic()
+
+
+def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_turns=8):
+    client = _make_client()
     messages = [{"role": "user", "content": user}]
     for _ in range(max_turns):
         resp = client.messages.create(
