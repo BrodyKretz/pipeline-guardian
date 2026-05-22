@@ -147,6 +147,47 @@ def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_tur
 
 
 # --------------------------------------------------------------------------- #
+# Generative agent helpers (AI mode only). Read tools return raw text only —
+# never attribution/colors/baseline, so the model stays blind to the overlay.
+# --------------------------------------------------------------------------- #
+from config import PIPELINE_FILE  # noqa: E402
+from tools.schemas import CHAOS_TOOLS  # noqa: E402
+
+
+def _read_tool(name):
+    if name == "read_data":
+        return DATA_FILE.read_text() if DATA_FILE.exists() else "<missing>"
+    if name == "read_pipeline":
+        return PIPELINE_FILE.read_text()
+    return {"error": "unknown tool"}
+
+
+def generate_sabotage(write_fn):
+    """Drive Claude to invent ONE breaking change. `write_fn(path, content)`
+    performs the (whitelisted, attributed) write and returns a plain string.
+    Returns the model's free-text note."""
+    captured = {"note": ""}
+
+    def executor(name, inp):
+        if name == "sabotage_file":
+            captured["note"] = inp.get("note", "")
+            return write_fn(inp["path"], inp["content"])  # plain string only
+        return _read_tool(name)
+
+    _anthropic_tool_loop(
+        "You are a chaos engineering agent attacking a weather ETL. Inspect the "
+        "data and pipeline, then introduce ONE small, plausible breaking change "
+        "to exactly ONE file via sabotage_file. Keep it subtle and realistic. "
+        "Call done when finished.",
+        "Investigate, then sabotage one file.",
+        CHAOS_TOOLS,
+        executor,
+        final_tool="done",
+    )
+    return captured["note"]
+
+
+# --------------------------------------------------------------------------- #
 # Public reasoning API (real -> Claude tool use, else -> deterministic mock)
 # --------------------------------------------------------------------------- #
 def decide_sabotage(recent_types):
