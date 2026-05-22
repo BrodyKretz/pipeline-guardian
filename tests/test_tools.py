@@ -1,13 +1,10 @@
 import pytest
 
 from restore import restore_all
+from agents.patch_agent import rewrite_pipeline_section
 from tools.file_tools import list_files, read_file, write_file
 from tools.log_tools import read_incident_log, write_incident_log
-from tools.pipeline_tools import (
-    get_last_output,
-    rewrite_pipeline_section,
-    run_pipeline,
-)
+from tools.pipeline_tools import get_last_output, run_pipeline
 
 
 @pytest.fixture(autouse=True)
