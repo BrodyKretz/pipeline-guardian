@@ -82,6 +82,7 @@ def _status():
         "timing": TIMING,
         "model": llm.MODEL,
         "models": MODELS,
+        "tokens": dict(llm.TOKEN_USAGE),
     }
 
 
@@ -90,6 +91,7 @@ def _full_reset():
     incident files, summary, SQLite db, and the working files. Call under
     bus.lock so it can't race a healing chain."""
     bus.reset()
+    llm.reset_token_usage()
     restore_all()
     for p in INCIDENTS_DIR.glob("*.json"):  # incident files + summary.json
         p.unlink(missing_ok=True)
