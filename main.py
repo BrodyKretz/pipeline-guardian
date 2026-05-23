@@ -99,7 +99,15 @@ def _monitor_job():
     try:
         monitor_agent.tick(bus)
     except Exception as e:  # never let a job crash the scheduler
-        bus.emit("monitor", "system", "ERROR", f"monitor job failed: {e}")
+        import traceback
+
+        traceback.print_exc()
+        bus.emit(
+            "monitor",
+            "system",
+            "ERROR",
+            f"monitor job failed: {type(e).__name__}: {e}",
+        )
 
 
 def _chaos_job():
@@ -107,7 +115,15 @@ def _chaos_job():
         if RUN_STATE == "running":
             run_chaos(bus)
     except Exception as e:
-        bus.emit("chaos", "system", "ERROR", f"chaos job failed: {e}")
+        import traceback
+
+        traceback.print_exc()  # full trace to server stderr
+        bus.emit(
+            "chaos",
+            "system",
+            "ERROR",
+            f"chaos job failed: {type(e).__name__}: {e}",
+        )
     finally:
         delay = random.randint(TIMING["chaos_min"], TIMING["chaos_max"])
         scheduler.add_job(

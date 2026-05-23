@@ -115,9 +115,11 @@ def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_tur
     client = _make_client()
     messages = [{"role": "user", "content": user}]
     for _ in range(max_turns):
+        # 4096 because chaos/patch tools include whole-file rewrites as args.
+        # 1024 was truncating tool inputs mid-emission, dropping required fields.
         resp = client.messages.create(
             model=MODEL,
-            max_tokens=1024,
+            max_tokens=4096,
             system=system,
             tools=tools,
             messages=messages,
@@ -176,6 +178,8 @@ def generate_sabotage(write_fn):
 
     def executor(name, inp):
         if name == "sabotage_file":
+            if "content" not in inp or "path" not in inp:
+                return "error: sabotage_file requires path and content fields"
             captured["note"] = inp.get("note", "")
             return write_fn(inp["path"], inp["content"])  # plain string only
         return _read_tool(name)
@@ -270,6 +274,8 @@ def generate_patch(diag, write_fn, feedback=None):
 
     def executor(name, inp):
         if name == "write_file":
+            if "content" not in inp or "path" not in inp:
+                return "error: write_file requires path and content fields"
             return write_fn(inp["path"], inp["content"])
         if name == "dry_run":
             return dry_run_pipeline()
