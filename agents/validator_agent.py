@@ -4,7 +4,10 @@ import llm
 from config import HEALTHY_ROW_COUNT
 from tools.pipeline_tools import get_last_output, run_pipeline
 
-_EXPECTED_KEYS = {"city", "temp", "humidity", "timestamp"}
+_EXPECTED_KEYS = {
+    "city", "station_id", "temp", "humidity", "conditions",
+    "wind_speed", "wind_direction", "pressure", "precipitation", "timestamp",
+}
 
 
 def _schema_ok():
@@ -17,6 +20,8 @@ def _schema_ok():
         and isinstance(row["temp"], float)
         and isinstance(row["humidity"], int)
         and isinstance(row["city"], str)
+        and isinstance(row["pressure"], float)
+        and isinstance(row["wind_speed"], float)
     )
 
 
