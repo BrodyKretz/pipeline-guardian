@@ -44,6 +44,9 @@
     box-shadow:0 0 12px rgba(48,209,88,.3)}
   .btn.stopped{border-color:var(--chaos);color:var(--chaos)}
   .btn:disabled{opacity:.35;cursor:default}
+  .iconbtn{font-size:16px;padding:5px 10px;line-height:1}
+  .iconbtn.copied{border-color:var(--validator);color:var(--validator);
+    box-shadow:0 0 12px rgba(48,209,88,.3)}
   .seg{display:flex;border:1px solid var(--border);border-radius:8px;overflow:hidden}
   .seg button{
     background:transparent;border:0;color:var(--dim);
@@ -224,6 +227,9 @@
       <button id="vGraph" class="sel">GRAPH</button>
       <button id="vFiles">FILES</button>
     </div>
+    <button class="btn iconbtn" id="bExport"
+      title="Copy full session (events, files, incidents) to clipboard
+for pasting into a Claude conversation">🙂</button>
     <div id="keyRow">
       <input id="keyInput" type="password" placeholder="paste ANTHROPIC_API_KEY" />
       <button class="btn" id="keySave">SAVE</button>
@@ -707,6 +713,24 @@ bPause.onclick=()=>control('pause');
 bStop.onclick=()=>control('stop');
 document.getElementById('vGraph').onclick=()=>showView('graph');
 document.getElementById('vFiles').onclick=()=>showView('files');
+
+async function exportSession(){
+  const b=document.getElementById('bExport');
+  const orig=b.textContent;
+  try{
+    const r=await fetch('/api/session-export');
+    const text=await r.text();
+    await navigator.clipboard.writeText(text);
+    b.classList.add('copied');
+    b.textContent='✓';
+    setTimeout(()=>{b.classList.remove('copied');b.textContent=orig;},1800);
+  }catch(e){
+    b.textContent='✗';
+    setTimeout(()=>{b.textContent=orig;},1800);
+    console.error('export failed',e);
+  }
+}
+document.getElementById('bExport').onclick=exportSession;
 
 async function setMode(mode,key){
   try{
