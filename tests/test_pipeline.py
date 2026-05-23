@@ -26,7 +26,10 @@ def test_healthy_run_succeeds():
     out = json.loads(OUTPUT_FILE.read_text())
     assert len(out) == 20
     assert isinstance(out[0]["temp"], float)
-    assert set(out[0]) == {"city", "temp", "humidity", "timestamp"}
+    assert set(out[0]) == {
+        "city", "station_id", "temp", "humidity", "conditions",
+        "wind_speed", "wind_direction", "pressure", "precipitation", "timestamp",
+    }
 
 
 def _records():
@@ -39,8 +42,8 @@ def _write(data):
 
 SABOTAGES = {
     "SCHEMA_RENAME": lambda: _write(
-        [{"temperature": r["temp"], "location": r["city"],
-          "humidity": r["humidity"], "timestamp": r["timestamp"]}
+        [{**{k: v for k, v in r.items() if k not in ("temp", "city")},
+          "temperature": r["temp"], "location": r["city"]}
          for r in _records()]
     ),
     "TYPE_CORRUPTION": lambda: _write(

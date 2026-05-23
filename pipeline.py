@@ -3,6 +3,11 @@ from datetime import datetime
 
 from config import DATA_FILE, OUTPUT_FILE
 
+_VALID_CONDITIONS = {
+    "clear", "cloudy", "partly_cloudy", "rain", "storm", "snow", "fog",
+}
+_VALID_DIRS = {"N", "NE", "E", "SE", "S", "SW", "W", "NW"}
+
 
 def run():
     """ETL: read weather_source.json, F->C + clean, write daily_summary.json.
@@ -31,16 +36,38 @@ def run():
         for rec in raw:
             temp_c = round((float(rec["temp"]) - 32) * 5.0 / 9.0, 2)
             city = rec["city"].strip()
+            station_id = rec["station_id"].strip()
             humidity = int(rec["humidity"])
             if not 0 <= humidity <= 100:
                 raise ValueError(f"humidity out of range: {humidity}")
+            conditions = rec["conditions"]
+            if conditions not in _VALID_CONDITIONS:
+                raise ValueError(f"unknown conditions: {conditions}")
+            wind_speed = float(rec["wind_speed"])
+            if wind_speed < 0:
+                raise ValueError(f"negative wind_speed: {wind_speed}")
+            wind_direction = rec["wind_direction"]
+            if wind_direction not in _VALID_DIRS:
+                raise ValueError(f"invalid wind_direction: {wind_direction}")
+            pressure = float(rec["pressure"])
+            if not 900 <= pressure <= 1100:
+                raise ValueError(f"pressure out of range: {pressure}")
+            precipitation = float(rec["precipitation"])
+            if precipitation < 0:
+                raise ValueError(f"negative precipitation: {precipitation}")
             ts = rec["timestamp"]
             datetime.fromisoformat(ts)
             out.append(
                 {
                     "city": city,
+                    "station_id": station_id,
                     "temp": temp_c,
                     "humidity": humidity,
+                    "conditions": conditions,
+                    "wind_speed": wind_speed,
+                    "wind_direction": wind_direction,
+                    "pressure": pressure,
+                    "precipitation": precipitation,
                     "timestamp": ts,
                 }
             )

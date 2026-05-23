@@ -18,17 +18,13 @@ def _write(data):
 
 
 def _schema_rename():
-    _write(
-        [
-            {
-                "temperature": r["temp"],
-                "location": r["city"],
-                "humidity": r["humidity"],
-                "timestamp": r["timestamp"],
-            }
-            for r in _read()
-        ]
-    )
+    out = []
+    for r in _read():
+        new = dict(r)
+        new["temperature"] = new.pop("temp")
+        new["location"] = new.pop("city")
+        out.append(new)
+    _write(out)
 
 
 def _type_corruption():
@@ -111,6 +107,11 @@ def _ai_chaos(bus):
         except json.JSONDecodeError:
             pass  # non-JSON content is allowed (realistic corrupted feed)
         before = target.read_text() if target.exists() else None
+        if before == content:
+            return (
+                "noop: proposed content is identical to current file — "
+                "no change was made. Pick a different mutation."
+            )
         target.write_text(content)
         emit_file_change(bus, "chaos", "damage", target, before, content)
         return f"wrote {len(content)} chars to {path_str}"
