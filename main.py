@@ -344,6 +344,28 @@ def api_incidents():
     return JSONResponse({"summary": summary, "recent": recent})
 
 
+@app.post("/api/chaos/trigger")
+def api_chaos_trigger():
+    """Fire chaos immediately, regardless of automation state. Runs in a
+    one-shot scheduler job so HTTP doesn't block on the AI tool loop."""
+    if bus.incident["active"]:
+        return JSONResponse(
+            {"ok": False, "reason": "incident already active"}, status_code=409
+        )
+    if not scheduler.running:
+        return JSONResponse(
+            {"ok": False, "reason": "scheduler not running"}, status_code=503
+        )
+    scheduler.add_job(
+        lambda: run_chaos(bus),
+        "date",
+        run_date=datetime.now(),
+        id="chaos_manual",
+        replace_existing=True,
+    )
+    return JSONResponse({"ok": True})
+
+
 @app.get("/api/session-export", response_class=PlainTextResponse)
 def api_session_export():
     """Dump everything Claude needs to analyze this session: config, current
