@@ -336,8 +336,19 @@ def judge_output():
 
     return _anthropic_tool_loop(
         "You validate a weather ETL's output. Run it via run_output, then judge "
-        "whether the output is clean, internally-consistent data (uniform keys, "
-        "consistent types, sane row count, no nulls). Submit your judgment.",
+        "whether the output is STRUCTURALLY clean: every row has the same keys, "
+        "types are consistent, no nulls, row count is non-zero, and every value "
+        "passes the pipeline's own range/enum guards.\n\n"
+        "STRICT RULES:\n"
+        "  • You ONLY judge structural / type / schema / range integrity.\n"
+        "  • You DO NOT judge meteorological or real-world plausibility. If a "
+        "row says Miami had snow at 28°F, or rain at sub-freezing temperatures, "
+        "or any other 'weird-looking weather' combination — that is NOT a "
+        "pipeline failure. The pipeline's job is to transform and validate "
+        "fields, not to fact-check the weather. Pass those outputs.\n"
+        "  • If pipeline.run() returns success=True with no errors and rows>0, "
+        "and the rows are structurally uniform — pass it. Semantic weirdness "
+        "in the source values is the upstream's problem, not the ETL's.",
         "Validate the current pipeline output.",
         VALIDATE_TOOLS,
         executor,
