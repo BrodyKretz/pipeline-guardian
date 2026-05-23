@@ -82,7 +82,11 @@ _DESC = {
 
 
 def _ai_chaos(bus):
-    """Creative branch: the model invents and writes one breaking change."""
+    """Creative branch: the model invents and writes one breaking change.
+
+    Hard guards enforce the "realistic upstream failures only" constraint:
+    no pipeline.py edits (that's a bad deploy, not an upstream issue), no
+    emptying the data feed (that's infra failure, not data drift)."""
 
     def write_fn(path_str, content):
         target = next(
@@ -90,6 +94,22 @@ def _ai_chaos(bus):
         )
         if target is None:
             return f"refused: {path_str} is not writable"
+        if target == PIPELINE_FILE:
+            return (
+                "error: chaos may only mutate the upstream data feed, not the "
+                "pipeline code. Edit data/weather_source.json instead."
+            )
+        if not content or not content.strip():
+            return "error: chaos may not empty the data feed."
+        try:
+            parsed = json.loads(content)
+            if isinstance(parsed, list) and len(parsed) == 0:
+                return (
+                    "error: chaos may not empty the dataset. Mutate records "
+                    "(rename, drift, corrupt values) instead."
+                )
+        except json.JSONDecodeError:
+            pass  # non-JSON content is allowed (realistic corrupted feed)
         before = target.read_text() if target.exists() else None
         target.write_text(content)
         emit_file_change(bus, "chaos", "damage", target, before, content)
