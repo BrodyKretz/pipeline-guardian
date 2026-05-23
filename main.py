@@ -8,18 +8,21 @@ from datetime import datetime, timedelta
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
 import llm
 from agents import monitor_agent
 from agents.chaos_agent import run_chaos
 from config import (
+    BASELINE_DIR,
     CHAOS_MAX_SEC,
     CHAOS_MIN_SEC,
+    DATA_FILE,
     DB_FILE,
     INCIDENTS_DIR,
     MONITOR_INTERVAL_SEC,
+    PIPELINE_FILE,
     ROOT,
     SUMMARY_FILE,
 )
@@ -339,6 +342,106 @@ def api_incidents():
     )[:10]
     recent = [json.loads(p.read_text()) for p in files]
     return JSONResponse({"summary": summary, "recent": recent})
+
+
+@app.get("/api/session-export", response_class=PlainTextResponse)
+def api_session_export():
+    """Dump everything Claude needs to analyze this session: config, current
+    file states (with baseline-drift status), incident records, and the full
+    in-memory event stream. Returned as a markdown blob the dashboard copies
+    to the clipboard for one-shot pasting into a Claude conversation."""
+    from datetime import timezone as _tz
+    from io import StringIO
+
+    out = StringIO()
+    out.write("# Pipeline Guardian — Session Export\n\n")
+    out.write(f"Exported: {datetime.now(_tz.utc).isoformat()}\n")
+    out.write(f"Mode: {_mode().upper()}\n")
+    out.write(f"Model: {llm.MODEL}\n")
+    out.write(f"Run state: {RUN_STATE}\n")
+    out.write(
+        f"Timing: monitor={TIMING['monitor']}s, "
+        f"chaos={TIMING['chaos_min']}-{TIMING['chaos_max']}s\n"
+    )
+    out.write(f"Events captured: {len(bus.events)}\n\n")
+
+    # Incident summary
+    summary = {"resolved": {}, "escalated": {}}
+    if SUMMARY_FILE.exists():
+        try:
+            summary = json.loads(SUMMARY_FILE.read_text())
+        except json.JSONDecodeError:
+            pass
+    res = sum(summary.get("resolved", {}).values())
+    esc = sum(summary.get("escalated", {}).values())
+    total = res + esc
+    out.write("## Incident Summary\n\n")
+    out.write(f"- Resolved: {res}\n- Escalated: {esc}\n- Total: {total}\n")
+    if total:
+        out.write(f"- Resolution rate: {100 * res // total}%\n")
+    out.write(f"\nResolved by type: `{summary.get('resolved', {})}`\n")
+    out.write(f"Escalated by type: `{summary.get('escalated', {})}`\n\n")
+
+    # Current file states (with baseline drift)
+    out.write("## Current File States (vs baseline)\n\n")
+    for label, path, baseline_path, lang in [
+        ("data/weather_source.json", DATA_FILE,
+         BASELINE_DIR / "weather_source.json", "json"),
+        ("pipeline.py", PIPELINE_FILE,
+         BASELINE_DIR / "pipeline.py", "python"),
+    ]:
+        out.write(f"### `{label}`\n\n")
+        if not path.exists():
+            out.write("_file is missing_\n\n")
+            continue
+        cur = path.read_text()
+        base = baseline_path.read_text() if baseline_path.exists() else ""
+        drift = "DRIFTED from baseline" if cur != base else "matches baseline"
+        out.write(f"Status: **{drift}** ({len(cur)} chars)\n\n")
+        out.write(f"```{lang}\n{cur}\n```\n\n")
+
+    # Recent incidents from disk (richer than summary)
+    out.write("## Recent Incident Records (newest first)\n\n")
+    files = sorted(
+        (p for p in INCIDENTS_DIR.glob("*.json") if p.name != "summary.json"),
+        reverse=True,
+    )[:20]
+    for p in files:
+        try:
+            rec = json.loads(p.read_text())
+            status = "RESOLVED" if rec.get("resolved") else "ESCALATED"
+            out.write(
+                f"- **[{rec.get('started_at', '?')}]** {status} in "
+                f"{rec.get('duration_seconds', 0)}s — "
+                f"`{rec.get('failure_type', '?')}` "
+                f"(conf {rec.get('diagnosis_confidence', '?')})\n"
+            )
+            fix = rec.get("fix_applied", "")
+            if fix:
+                fix_short = fix if len(fix) < 240 else fix[:237] + "..."
+                out.write(f"  - fix: {fix_short}\n")
+        except Exception:
+            continue
+    out.write("\n")
+
+    # Full in-memory event stream (chronological)
+    out.write("## Full Event Stream (chronological)\n\n```\n")
+    for ev in bus.events:
+        ts = ev["timestamp"][11:19]  # HH:MM:SS
+        out.write(
+            f"[{ts}] {ev['type']:<22} "
+            f"{ev['from_agent']:>10} -> {ev['to_agent']:<10}  "
+            f"{ev['message']}\n"
+        )
+        # include compact data dict if small (skip noisy file diffs)
+        d = ev.get("data") or {}
+        if d and ev["type"] != "FILE_CHANGED":
+            ds = json.dumps(d)
+            if len(ds) < 240:
+                out.write(f"           data: {ds}\n")
+    out.write("```\n")
+
+    return out.getvalue()
 
 
 @app.websocket("/ws")
