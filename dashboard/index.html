@@ -138,6 +138,18 @@
   .inc .dur{color:var(--dim)}
   .ok{background:rgba(48,209,88,.18);color:var(--validator)}
   .esc{background:rgba(255,45,85,.18);color:var(--chaos)}
+  #filesPanel{right:20px;top:72px;width:360px;height:320px;display:flex;
+    flex-direction:column}
+  #filesPanelTabs{padding:8px 12px;display:flex;gap:6px;flex-wrap:wrap;
+    border-bottom:1px solid var(--border)}
+  #filesPanelTabs button{background:rgba(255,255,255,.05);
+    border:1px solid var(--border);color:var(--dim);
+    font:700 10px ui-monospace,monospace;padding:5px 9px;
+    border-radius:6px;cursor:pointer}
+  #filesPanelTabs button.sel{color:var(--txt);border-color:var(--patch)}
+  #filesPanelView{flex:1;overflow:auto;padding:10px 14px;
+    font:11px/1.5 ui-monospace,monospace;white-space:pre;color:var(--dim);
+    margin:0}
   #files{position:fixed;inset:56px 0 0 0;display:flex;flex-direction:column;
     padding:16px 24px;gap:12px;z-index:10}
   #fileTabs{display:flex;gap:8px;flex-wrap:wrap}
@@ -222,6 +234,12 @@
     <div class="body" id="logBody"></div>
   </div>
 
+  <div class="panel" id="filesPanel">
+    <h3>Watched Files</h3>
+    <div id="filesPanelTabs"></div>
+    <pre id="filesPanelView"></pre>
+  </div>
+
   <div class="panel" id="side">
     <h3>Incident Status</h3>
     <div class="body">
@@ -257,33 +275,47 @@ function showView(v){
   const files=v==='files';
   document.getElementById('files').style.display=files?'flex':'none';
   document.getElementById('stage').style.display=files?'none':'block';
+  // hide the corner panel while the full-screen view is up (avoid redundancy)
+  document.getElementById('filesPanel').style.display=files?'none':'flex';
   document.getElementById('vFiles').classList.toggle('sel',files);
   document.getElementById('vGraph').classList.toggle('sel',!files);
+}
+
+// Tabs/views are rendered into both the full-screen FILES view and the
+// top-right corner panel so the same content is visible either way.
+const TAB_HOSTS=['fileTabs','filesPanelTabs'];
+const VIEW_HOSTS=['fileView','filesPanelView'];
+
+function _selectTab(path){
+  TAB_HOSTS.forEach(id=>{
+    [...document.getElementById(id).children]
+      .forEach(c=>c.classList.toggle('sel',c.textContent===path));
+  });
 }
 
 function ensureTab(path){
   if(fileState[path])return;
   fileState[path]={lines:[]};
-  const b=document.createElement('button');
-  b.textContent=path;
-  b.onclick=()=>{
-    activeFile=path;renderFile();
-    [...document.getElementById('fileTabs').children]
-      .forEach(c=>c.classList.toggle('sel',c.textContent===path));
-  };
-  document.getElementById('fileTabs').appendChild(b);
-  if(!activeFile){activeFile=path;b.classList.add('sel');}
+  TAB_HOSTS.forEach(id=>{
+    const b=document.createElement('button');
+    b.textContent=path;
+    b.onclick=()=>{activeFile=path;renderFile();_selectTab(path);};
+    document.getElementById(id).appendChild(b);
+  });
+  if(!activeFile){activeFile=path;_selectTab(path);}
 }
 
 function renderFile(){
-  const view=document.getElementById('fileView');
-  view.replaceChildren();
   const st=fileState[activeFile];
-  if(!st){view.appendChild(el('span','empty','no files changed yet'));return;}
-  st.lines.forEach(l=>{
-    const span=el('span','ln'+(l.cls?(' '+l.cls):''),l.text+'\n');
-    if(l.color)span.style.color=l.color;
-    view.appendChild(span);
+  VIEW_HOSTS.forEach(id=>{
+    const view=document.getElementById(id);
+    view.replaceChildren();
+    if(!st){view.appendChild(el('span','empty','no files changed yet'));return;}
+    st.lines.forEach(l=>{
+      const span=el('span','ln'+(l.cls?(' '+l.cls):''),l.text+'\n');
+      if(l.color)span.style.color=l.color;
+      view.appendChild(span);
+    });
   });
 }
 
@@ -565,8 +597,8 @@ function resetUI(){
   Object.keys(nodes).forEach(n=>{setStatus(n,'idle');setLast(n,'');});
   Object.keys(fileState).forEach(k=>delete fileState[k]);
   activeFile=null;
-  document.getElementById('fileTabs').replaceChildren();
-  document.getElementById('fileView').replaceChildren();
+  TAB_HOSTS.forEach(id=>document.getElementById(id).replaceChildren());
+  VIEW_HOSTS.forEach(id=>document.getElementById(id).replaceChildren());
 }
 
 async function control(action){
