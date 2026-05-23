@@ -116,7 +116,19 @@ def _ai_chaos(bus):
         return f"wrote {len(content)} chars to {path_str}"
 
     bus.emit("chaos", "pipeline", "SABOTAGE_PLANNED", "Planning a creative sabotage")
-    note = llm.generate_sabotage(write_fn)
+    result = llm.generate_sabotage(write_fn)
+    if not result["applied"]:
+        # Model planned but never produced a valid write (guards refused, or it
+        # gave up). Be honest: no SABOTAGE_APPLIED, monitor will see healthy.
+        bus.emit(
+            "chaos",
+            "system",
+            "SABOTAGE_ABORTED",
+            "Chaos planned a change but no valid mutation was applied "
+            "(guards refused or model gave up).",
+        )
+        return None
+    note = result["note"]
     bus.last_sabotage = note or "creative"
     bus.emit(
         "chaos",
