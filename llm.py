@@ -170,7 +170,7 @@ def _read_tool(name):
     return {"error": "unknown tool"}
 
 
-def generate_sabotage(write_fn, recent_notes=None):
+def generate_sabotage(write_fn, recent_notes=None, category=None):
     """Drive Claude to invent ONE breaking change. `write_fn(path, content)`
     performs the (whitelisted, attributed) write and returns a plain string
     prefixed with "wrote" on success or "error"/"refused" on rejection.
@@ -202,26 +202,38 @@ def generate_sabotage(write_fn, recent_notes=None):
             short = (n[:200] + "…") if len(n) > 200 else n
             history_block += f"  {i}. {short}\n"
 
+    category_block = ""
+    if category and category != "random":
+        category_block = (
+            f"\n\nThe operator specifically requested a sabotage in this "
+            f"category: **{category}**. Stay within that class but still "
+            f"invent a novel concrete variant.\n"
+        )
+
     _anthropic_tool_loop(
         "You simulate REALISTIC upstream failures in a weather data feed — the "
         "kind that actually happen in production ETLs when a vendor API changes "
         "or a sensor misbehaves. Mutate data/weather_source.json in ONE small "
         "way. INVENT the specifics yourself — do not echo familiar examples.\n\n"
         "Pick ONE abstract failure class and invent your own concrete variant:\n"
-        "  • Schema drift — a field is renamed, dropped, or added\n"
-        "  • Type drift — a field's runtime type shifts\n"
-        "  • Format drift — a field's serialization format shifts\n"
-        "  • Encoding drift — case, whitespace, unicode, or character set shifts\n"
-        "  • Bad sensor reading — an out-of-range or null value appears\n"
-        "  • Volume drift — records get duplicated, partially fetched, reordered\n"
-        "  • Unit drift — a numeric field switches measurement system\n"
-        "  • Structural drift — the container shape changes\n\n"
-        "Be genuinely creative. The MOST INTERESTING sabotages are subtle, "
+        "  • schema_drift — a field is renamed, dropped, or added\n"
+        "  • type_drift — a field's runtime type shifts\n"
+        "  • format_drift — a field's serialization format shifts\n"
+        "  • encoding_drift — case, whitespace, unicode, or character set shifts\n"
+        "  • bad_sensor — an out-of-range or null value appears in some records\n"
+        "  • volume_drift — records get duplicated, partially fetched, reordered\n"
+        "  • unit_drift — a numeric field switches measurement system\n"
+        "  • structural_drift — the container shape changes\n" + category_block
+        + "\nBe genuinely creative. The MOST INTERESTING sabotages are subtle, "
         "novel, or affect only some records. Avoid the obvious textbook "
         "examples (ISO↔epoch, temp↔temperature) unless you make them weird.\n\n"
         "You MUST NOT:\n"
         "  • Empty the file or grow the record count\n"
-        "  • Edit pipeline.py (deploy-time concerns are not upstream failures)"
+        "  • Edit pipeline.py (deploy-time concerns are not upstream failures)\n\n"
+        "FORMAT OF YOUR `note` FIELD: ONE concise sentence (≤25 words) stating "
+        "exactly what you changed and the immediate consequence. No paragraphs, "
+        "no preamble, no example values. Example: \"Renamed `temp` → `temp_f` "
+        "across all records; pipeline's rec['temp'] lookup will KeyError.\""
         + history_block
         + "\n\nApply ONE change via sabotage_file, then call done.",
         "Investigate the data feed, then simulate one realistic upstream "
@@ -330,31 +342,41 @@ def generate_patch(diag, write_fn, feedback=None, recent_fixes=None):
             history_block += f"  {i}. {short}\n"
 
     return _anthropic_tool_loop(
-        "You are a self-healing agent for a weather ETL whose upstream feed "
-        "just drifted. Read both files, find the fault, and apply ONE fix:\n"
-        "  (a) Edit pipeline.py so it tolerates the new upstream shape — "
-        "preferred for schema/format/type drift.\n"
-        "  (b) Clean, clamp, or filter values in the existing data (drop "
-        "bad rows, clamp out-of-range, dedupe).\n"
-        "You may dry_run to verify before submitting.\n\n"
-        "PREFER DEFENSIVE FIXES OVER MINIMAL SWAPS.\n"
-        "If chaos renamed `temp` → `temperature`, DO NOT just swap the "
-        "lookup to `rec[\"temperature\"]` — that re-breaks the moment the "
-        "feed reverts or the next drift hits. Instead use a tolerant "
-        "pattern like `rec.get(\"temp\", rec.get(\"temperature\"))` so the "
-        "pipeline handles BOTH schemas. Same principle for type drift "
-        "(coerce via a helper that accepts multiple types), format drift "
-        "(branch on input shape), unit drift (detect the unit). Each heal "
-        "must leave the pipeline STRICTLY MORE TOLERANT than before — "
-        "never less. The goal is durable hardening that accumulates, "
-        "not a one-shot patch that bounces back on the next drift.\n\n"
+        "You are a data engineer healing a broken ETL. You don't own the "
+        "upstream feed — you only own the pipeline. Choose the realistic "
+        "fix for the problem class:\n\n"
+        "  • Schema drift (renamed/added/removed column) → edit pipeline.py "
+        "to read the new shape with a tolerant fallback. NEVER tell the "
+        "source to rename it back. If a critical column is truly missing, "
+        "default it or drop the row, and note the drop in your summary.\n"
+        "  • Malformed data (wrong types, garbage values) → add a "
+        "cleaning/coercion layer at ingestion in pipeline.py (cast, parse "
+        "with fallback, replace 'N/A' with null). Don't change the core "
+        "transform — add a sanitization layer in front of it.\n"
+        "  • Out-of-range / null values → drop the bad row or clamp it. "
+        "Never fabricate a replacement value.\n"
+        "  • Duplicates / volume drift → add dedup or pagination handling "
+        "in pipeline.py (the write side, not the data).\n"
+        "  • Logic bug in the transform → fix the transform logic.\n\n"
+        "PREFER DEFENSIVE FIXES OVER MINIMAL SWAPS. Each heal must leave "
+        "the pipeline STRICTLY MORE TOLERANT than before — never less. "
+        "If chaos renames `temp` → `temperature`, write "
+        "`rec.get(\"temp\", rec.get(\"temperature\"))` so BOTH shapes work, "
+        "never just swap the lookup (that re-breaks on the next flip). "
+        "Same idea for type/format/unit drift — handle multiple cases via "
+        "a helper or isinstance branch.\n\n"
         "HARD RULES:\n"
-        "  • NEVER invent records that weren't in the source data. Cleaning, "
-        "filtering, clamping is fine — fabricating new ones is not.\n"
-        "  • If the data is unrecoverable, edit pipeline.py or escalate. Do "
-        "NOT fake data to make tests pass.\n"
-        "  • Do not assume any baseline/reference exists." + extra
-        + history_block,
+        "  • NEVER invent records. Cleaning, filtering, clamping is fine — "
+        "fabricating new rows is not.\n"
+        "  • Never UNDO or invert a fix that's already in the recent patch "
+        "history below — build on it.\n"
+        "  • If the data is unrecoverable, edit pipeline.py or escalate. "
+        "Do NOT fake data to pass validation.\n\n"
+        "FORMAT OF YOUR `summary` FIELD: ONE concise sentence (≤30 words) "
+        "stating exactly what you changed and why. No paragraphs, no "
+        "preamble, no code blocks. Example: \"Added tolerant lookup "
+        "rec.get('temp', rec.get('temperature')) so pipeline handles "
+        "either schema after vendor rename.\"" + extra + history_block,
         f"Diagnosis: {diag.get('reasoning', '')}. Fix it, then submit_patch.",
         PATCH_TOOLS,
         executor,
