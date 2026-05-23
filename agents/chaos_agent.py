@@ -105,7 +105,22 @@ def _ai_chaos(bus):
                     "(rename, drift, corrupt values) instead."
                 )
         except json.JSONDecodeError:
-            pass  # non-JSON content is allowed (realistic corrupted feed)
+            parsed = None  # non-JSON content is allowed (realistic corrupted feed)
+        # Symmetry with patch: chaos may not GROW the record count either.
+        # Real upstream feeds drift; they don't resurrect dropped stations
+        # out of nowhere.
+        if target.exists() and parsed is not None and isinstance(parsed, list):
+            try:
+                cur = json.loads(target.read_text())
+                if isinstance(cur, list) and len(parsed) > len(cur):
+                    return (
+                        f"error: chaos may not add records that weren't in "
+                        f"the current feed ({len(cur)} -> {len(parsed)}). "
+                        f"Drift, rename, corrupt, or drop — but don't "
+                        f"resurrect rows. Pick a different mutation."
+                    )
+            except json.JSONDecodeError:
+                pass  # current file already non-JSON; nothing to compare
         before = target.read_text() if target.exists() else None
         if before == content:
             return (

@@ -128,6 +128,34 @@ def test_ai_chaos_rejects_emptying_the_data(monkeypatch):
     assert DATA_FILE.read_text() == original  # guard refused the empty write
 
 
+def test_ai_chaos_refuses_to_grow_row_count(monkeypatch):
+    """Chaos may drift/corrupt/drop records but not resurrect dropped ones."""
+    import json as _json
+
+    from agents.chaos_agent import run_chaos
+    from config import DATA_FILE
+
+    # simulate a prior incident having dropped data down to 5 records
+    current = _json.loads(DATA_FILE.read_text())[:5]
+    DATA_FILE.write_text(_json.dumps(current))
+    inflated = _json.dumps(current + [{"city": "X", "station_id": "Y", "temp": 0,
+                                        "humidity": 0, "conditions": "clear",
+                                        "wind_speed": 0, "wind_direction": "N",
+                                        "pressure": 1000, "precipitation": 0,
+                                        "timestamp": "2026-05-17T00:00:00"}] * 20)
+    script = [
+        FakeResp([FakeBlock("sabotage_file", {
+            "path": "data/weather_source.json",
+            "content": inflated, "note": "fabricate rows"})]),
+        FakeResp([FakeBlock("done", {})]),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    before = DATA_FILE.read_text()
+    run_chaos(bus)
+    assert DATA_FILE.read_text() == before  # guard refused row inflation
+
+
 def test_ai_chaos_rejects_pipeline_edit(monkeypatch):
     from agents.chaos_agent import run_chaos
     from config import PIPELINE_FILE
