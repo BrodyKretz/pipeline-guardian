@@ -159,6 +159,28 @@
   body.view-files #log,
   body.view-files #side,
   body.view-files #filesPanel{display:none}
+  #fileErrors{position:fixed;left:20px;top:88px;width:240px;
+    display:none;flex-direction:column;background:var(--panel);
+    border:1px solid var(--border);border-radius:14px;
+    backdrop-filter:blur(10px);overflow:hidden;z-index:11}
+  body.view-files #fileErrors{display:flex}
+  #fileErrors h4{font-size:11px;letter-spacing:2px;color:var(--dim);
+    padding:12px 16px;border-bottom:1px solid var(--border);
+    text-transform:uppercase;font-weight:700}
+  #fileErrors .body{padding:14px 16px;display:flex;flex-direction:column;gap:10px}
+  .errBadge{display:inline-flex;align-items:center;gap:8px;
+    font-size:12px;font-weight:700;letter-spacing:1.5px}
+  .errBadge.idle{color:var(--validator)}
+  .errBadge.active{color:var(--chaos)}
+  .errBadge.resolved{color:var(--validator)}
+  .errBadge.escalated{color:var(--chaos)}
+  .errBadge .d{width:9px;height:9px;border-radius:50%;background:currentColor;
+    box-shadow:0 0 10px currentColor}
+  #errCause{font-size:11px;color:var(--txt);line-height:1.45;
+    word-break:break-word;max-height:88px;overflow:hidden}
+  #errStage{font-size:10px;color:var(--dim);letter-spacing:.5px;
+    text-transform:uppercase;font-weight:600}
+  #errCause:empty,#errStage:empty{display:none}
   .fcol{
     flex:1;min-width:0;display:flex;flex-direction:column;
     background:rgba(0,0,0,.45);border:1px solid var(--border);border-radius:14px;
@@ -218,6 +240,17 @@
   <div id="stage">
     <svg id="wires"></svg>
     <div id="burst"></div>
+  </div>
+
+  <div id="fileErrors">
+    <h4>Pipeline State</h4>
+    <div class="body">
+      <div id="errBadge" class="errBadge idle">
+        <span class="d"></span><span id="errLabel">IDLE</span>
+      </div>
+      <div id="errCause"></div>
+      <div id="errStage"></div>
+    </div>
   </div>
 
   <div id="files">
@@ -343,6 +376,40 @@ function renderSplit(){
 
 function renderFile(){renderPanel();renderSplit();}
 
+// ---- compact pipeline-state panel (visible in FILES view) ----
+function _setErr(badgeCls, label, cause, stage){
+  const b=document.getElementById('errBadge');
+  if(!b)return;
+  b.className='errBadge '+badgeCls;
+  document.getElementById('errLabel').textContent=label;
+  if(cause!==undefined)
+    document.getElementById('errCause').textContent=
+      cause && cause.length>140 ? cause.slice(0,139)+'…' : (cause||'');
+  if(stage!==undefined)
+    document.getElementById('errStage').textContent=stage||'';
+}
+function updateFileErrors(ev){
+  switch(ev.type){
+    case 'FAILURE_DETECTED':
+      _setErr('active','INCIDENT ACTIVE', ev.message, 'diagnosing…'); break;
+    case 'DIAGNOSIS_COMPLETE':
+      _setErr('active','INCIDENT ACTIVE', ev.message, 'patching…'); break;
+    case 'PATCH_APPLIED':
+      _setErr('active','INCIDENT ACTIVE', undefined, 'validating…'); break;
+    case 'VALIDATION_FAILED':
+      _setErr('active','INCIDENT ACTIVE', undefined, 'retrying…'); break;
+    case 'ESCALATE':
+      _setErr('escalated','ESCALATED', ev.message, ''); break;
+    case 'INCIDENT_CLOSED':
+      const ok=ev.data && ev.data.resolved;
+      _setErr(ok?'resolved':'escalated', ok?'RESOLVED':'ESCALATED',
+              ev.message, ''); break;
+    case 'PIPELINE_HEALTHY':
+      if(!curIncident) _setErr('idle','HEALTHY','','');
+      break;
+  }
+}
+
 function applyFileChange(d){
   ensureTab(d.path);
   const before=(d.before==null?'':d.before).split('\n');
@@ -467,6 +534,7 @@ function handle(ev){
     applyFileChange(ev.data);
     return;   // file events drive the viewer, not the agent graph
   }
+  updateFileErrors(ev);
   logEvent(ev);
   const isSab=ev.type.includes('SABOTAGE');
   wire(ev.from_agent,ev.to_agent,ev.type,
@@ -625,6 +693,7 @@ function resetUI(){
   document.getElementById('filesPanelView').replaceChildren();
   Object.values(SPLIT_PATHS).forEach(id=>
     document.getElementById(id).replaceChildren());
+  _setErr('idle','IDLE','','');
 }
 
 async function control(action){
