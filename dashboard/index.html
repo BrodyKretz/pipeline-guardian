@@ -150,17 +150,30 @@
   #filesPanelView{flex:1;overflow:auto;padding:10px 14px;
     font:11px/1.5 ui-monospace,monospace;white-space:pre;color:var(--dim);
     margin:0}
-  #files{position:fixed;inset:56px 0 0 0;display:flex;flex-direction:column;
-    padding:16px 24px;gap:12px;z-index:10}
-  #fileTabs{display:flex;gap:8px;flex-wrap:wrap}
-  #fileTabs button{background:rgba(255,255,255,.05);border:1px solid var(--border);
-    color:var(--dim);font:700 11px ui-monospace,monospace;padding:8px 14px;
-    border-radius:8px;cursor:pointer;letter-spacing:.5px}
-  #fileTabs button.sel{color:var(--txt);border-color:var(--patch)}
-  #fileView{flex:1;overflow:auto;background:rgba(0,0,0,.35);
-    border:1px solid var(--border);border-radius:12px;padding:16px 18px;
-    font:13px/1.55 ui-monospace,monospace;white-space:pre;color:var(--dim);margin:0}
-  #fileView .empty{color:var(--dim);opacity:.6}
+  #files{
+    position:fixed;top:88px;bottom:80px;left:50%;transform:translateX(-50%);
+    width:min(1180px,92vw);display:none;gap:18px;padding:0;z-index:10;
+  }
+  body.view-files #files{display:flex}
+  body.view-files #cfg,
+  body.view-files #log,
+  body.view-files #side,
+  body.view-files #filesPanel{display:none}
+  .fcol{
+    flex:1;min-width:0;display:flex;flex-direction:column;
+    background:rgba(0,0,0,.45);border:1px solid var(--border);border-radius:14px;
+    backdrop-filter:blur(10px);overflow:hidden;
+  }
+  .fcol h4{
+    font-size:11px;letter-spacing:2px;color:var(--dim);
+    padding:12px 16px;border-bottom:1px solid var(--border);
+    text-transform:uppercase;font-weight:700;
+  }
+  .fcol pre{
+    flex:1;overflow:auto;padding:14px 16px;margin:0;
+    font:12px/1.55 ui-monospace,monospace;white-space:pre;color:var(--dim);
+  }
+  .fcol .empty{color:var(--dim);opacity:.45;font-style:italic}
   .ln{display:block;border-radius:3px;padding:0 4px}
   .ln.damage{color:#ff5b73;background:rgba(255,45,85,.12)}
   .ln.heal{background:rgba(255,255,255,.05)}
@@ -207,9 +220,15 @@
     <div id="burst"></div>
   </div>
 
-  <div id="files" style="display:none">
-    <div id="fileTabs"></div>
-    <pre id="fileView"></pre>
+  <div id="files">
+    <div class="fcol">
+      <h4>data/weather_source.json</h4>
+      <pre id="fileView_data"></pre>
+    </div>
+    <div class="fcol">
+      <h4>pipeline.py</h4>
+      <pre id="fileView_pipe"></pre>
+    </div>
   </div>
 
   <div class="panel" id="cfg">
@@ -273,51 +292,56 @@ let fileChangeAgent='chaos';
 
 function showView(v){
   const files=v==='files';
-  document.getElementById('files').style.display=files?'flex':'none';
+  document.body.classList.toggle('view-files',files);
   document.getElementById('stage').style.display=files?'none':'block';
-  // hide the corner panel while the full-screen view is up (avoid redundancy)
-  document.getElementById('filesPanel').style.display=files?'none':'flex';
   document.getElementById('vFiles').classList.toggle('sel',files);
   document.getElementById('vGraph').classList.toggle('sel',!files);
+  renderSplit();
 }
 
-// Tabs/views are rendered into both the full-screen FILES view and the
-// top-right corner panel so the same content is visible either way.
-const TAB_HOSTS=['fileTabs','filesPanelTabs'];
-const VIEW_HOSTS=['fileView','filesPanelView'];
-
-function _selectTab(path){
-  TAB_HOSTS.forEach(id=>{
-    [...document.getElementById(id).children]
-      .forEach(c=>c.classList.toggle('sel',c.textContent===path));
-  });
-}
+// The compact corner panel keeps tabs (activeFile is its current pick).
+// The full-screen view always shows both files side-by-side, no tabs.
+const SPLIT_PATHS={'data/weather_source.json':'fileView_data',
+                   'pipeline.py':'fileView_pipe'};
 
 function ensureTab(path){
   if(fileState[path])return;
   fileState[path]={lines:[]};
-  TAB_HOSTS.forEach(id=>{
-    const b=document.createElement('button');
-    b.textContent=path;
-    b.onclick=()=>{activeFile=path;renderFile();_selectTab(path);};
-    document.getElementById(id).appendChild(b);
-  });
-  if(!activeFile){activeFile=path;_selectTab(path);}
+  const b=document.createElement('button');
+  b.textContent=path;
+  b.onclick=()=>{activeFile=path;renderPanel();
+    [...document.getElementById('filesPanelTabs').children]
+      .forEach(c=>c.classList.toggle('sel',c.textContent===path));};
+  document.getElementById('filesPanelTabs').appendChild(b);
+  if(!activeFile){activeFile=path;b.classList.add('sel');}
 }
 
-function renderFile(){
-  const st=fileState[activeFile];
-  VIEW_HOSTS.forEach(id=>{
-    const view=document.getElementById(id);
-    view.replaceChildren();
-    if(!st){view.appendChild(el('span','empty','no files changed yet'));return;}
-    st.lines.forEach(l=>{
-      const span=el('span','ln'+(l.cls?(' '+l.cls):''),l.text+'\n');
-      if(l.color)span.style.color=l.color;
-      view.appendChild(span);
-    });
+function _renderLines(view, lines){
+  view.replaceChildren();
+  lines.forEach(l=>{
+    const span=el('span','ln'+(l.cls?(' '+l.cls):''),l.text+'\n');
+    if(l.color)span.style.color=l.color;
+    view.appendChild(span);
   });
 }
+
+function renderPanel(){
+  const st=fileState[activeFile];
+  const view=document.getElementById('filesPanelView');
+  if(!st){view.replaceChildren(el('span','empty','no files changed yet'));return;}
+  _renderLines(view, st.lines);
+}
+
+function renderSplit(){
+  for(const [path,id] of Object.entries(SPLIT_PATHS)){
+    const view=document.getElementById(id);
+    const st=fileState[path];
+    if(!st){view.replaceChildren(el('span','empty','no changes yet'));continue;}
+    _renderLines(view, st.lines);
+  }
+}
+
+function renderFile(){renderPanel();renderSplit();}
 
 function applyFileChange(d){
   ensureTab(d.path);
@@ -597,8 +621,10 @@ function resetUI(){
   Object.keys(nodes).forEach(n=>{setStatus(n,'idle');setLast(n,'');});
   Object.keys(fileState).forEach(k=>delete fileState[k]);
   activeFile=null;
-  TAB_HOSTS.forEach(id=>document.getElementById(id).replaceChildren());
-  VIEW_HOSTS.forEach(id=>document.getElementById(id).replaceChildren());
+  document.getElementById('filesPanelTabs').replaceChildren();
+  document.getElementById('filesPanelView').replaceChildren();
+  Object.values(SPLIT_PATHS).forEach(id=>
+    document.getElementById(id).replaceChildren());
 }
 
 async function control(action){
