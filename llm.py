@@ -19,6 +19,13 @@ from config import DATA_FILE, HEALTHY_ROW_COUNT, MODEL, SABOTAGE_TYPES
 # explicitly enabled — anthropic.Anthropic() reads it from the environment.
 USE_REAL = False
 
+# Per-agent model assignment (mutable at runtime via /api/model). MODEL is the
+# default used by diagnosis + validator. CHAOS gets its own slot (cheap model
+# is fine — chaos doesn't need to be smart). PATCH gets its own (smart model
+# pays off — patches must be defensive and durable).
+MODEL_CHAOS = "claude-sonnet-4-6"
+MODEL_PATCH = "claude-sonnet-4-6"
+
 
 # --------------------------------------------------------------------------- #
 # Real-signal inspection (shared by mock brain AND the real diagnosis tools)
@@ -142,14 +149,16 @@ def _record_usage(resp):
     TOKEN_USAGE["calls"] += 1
 
 
-def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_turns=8):
+def _anthropic_tool_loop(
+    system, user, tools, tool_executor, final_tool, max_turns=8, model=None,
+):
     client = _make_client()
     messages = [{"role": "user", "content": user}]
     for _ in range(max_turns):
         # 4096 because chaos/patch tools include whole-file rewrites as args.
         # 1024 was truncating tool inputs mid-emission, dropping required fields.
         resp = client.messages.create(
-            model=MODEL,
+            model=model or MODEL,
             max_tokens=4096,
             system=system,
             tools=tools,
@@ -273,6 +282,7 @@ def generate_sabotage(write_fn, recent_notes=None, category=None):
         CHAOS_TOOLS,
         executor,
         final_tool="done",
+        model=MODEL_CHAOS,
     )
     return {"applied": captured["applied"], "note": captured["note"]}
 
@@ -413,6 +423,7 @@ def generate_patch(diag, write_fn, feedback=None, recent_fixes=None):
         PATCH_TOOLS,
         executor,
         "submit_patch",
+        model=MODEL_PATCH,
     )
 
 

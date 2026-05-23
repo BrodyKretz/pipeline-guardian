@@ -1,68 +1,44 @@
 # 🛡️ Pipeline Guard
 
-**A multi-agent self-healing system: one agent sabotages a data pipeline, five
-others detect, diagnose, repair, and verify the damage — with a live dashboard
-to watch it happen.**
+**A multi-agent self-healing data pipeline. Chaos breaks it. Five other agents detect, diagnose, repair, validate, and log every break — live, on a dashboard you can watch.**
 
-A **Chaos Agent** continuously sabotages an ETL pipeline. A **self-healing
-chain** — Monitor → Diagnosis → Patch → Validator → Reporter — detects,
-diagnoses, repairs, and verifies every break autonomously. A real-time
-dashboard renders all six agents as nodes on a clock face with animated
-messages flowing between them as they fight.
+When you flip the dashboard to **AI mode**, every agent reasons through Claude via tool use. Chaos invents realistic upstream-feed failures by reading your actual data and pipeline source. Diagnosis classifies them in free text. Patch writes durable, defensive fixes that *accumulate* — the pipeline genuinely hardens over time. Validator judges output structure. None of them ever see the baseline (it's not an answer key) or the colored damage/heal overlays (those are for you).
 
-> **Read this before you judge the "AI" part — [Where the intelligence actually
-> is](#where-the-intelligence-actually-is).** Short version: these are six
-> agents in the *architectural* sense (bounded roles, isolated, communicating
-> over an event bus). Only the **two** steps that require genuine judgment —
-> Chaos's sabotage choice and Diagnosis's root-cause classification — call the
-> Claude API, and only when a key is set. The other four are deterministic by
-> design, because using an LLM where a rule is correct would be worse
-> engineering. This is a deliberate decision, not a shortcut.
+In **mock mode** the same architecture runs on a deterministic 7-enum path. No API key needed. Each round resolves in milliseconds.
 
 ---
 
-## How it works
+## What you see
 
 ```
-          ┌─────────────────────────────────────────────┐
-          │                  CHAOS ⚡                     │
-          │   picks & applies 1 of 7 sabotages to the     │
-          │   data source every 3–6 min (if no incident)  │
-          └───────────────────────┬─────────────────────┘
-                                   │ corrupts
-                                   ▼
-                          data/weather_source.json
-                                   │
-   MONITOR 👁  every 60s ──────────┘ runs pipeline.py
+              ┌───────────────────────────────┐
+              │           CHAOS ⚡             │
+              │  Invents one realistic upstream│
+              │  failure (schema/type/format/  │
+              │  encoding/value/volume drift)  │
+              │  and mutates the data feed.    │
+              └───────────────┬───────────────┘
+                              │ damages
+                              ▼
+                  data/weather_source.json
+                              │
+   MONITOR 👁  every 15–60s ──┘ runs pipeline.py in a subprocess
         │ failure / row-count anomaly
         ▼
-   DIAGNOSIS 🔍 ── classifies root cause from observable signals only
-        │ (confidence-scored; <0.6 or UNKNOWN ⇒ escalate)
+   DIAGNOSIS 🔍 reads both files; submits free-form root cause + confidence
+        │ <0.60 → escalate
         ▼
-   PATCH 🔧 ── applies the targeted fix
-        │ ≥0.85 direct · 0.60–0.84 unverified · <0.60 escalate
+   PATCH 🔧 reads files (NOT baseline); writes a defensive fix to pipeline.py
+        │      or cleans/clamps existing data. Never invents records.
+        │      Can dry_run + retry once with validator feedback.
         ▼
-   VALIDATOR ✓ ── re-runs pipeline, checks rows + schema
+   VALIDATOR ✓ re-runs the pipeline; judges output structural integrity
         │ pass / fail
         ▼
-   REPORTER 📋 ── writes incident JSON + summary + SQLite,
-                  then restores pipeline.py & data to a clean baseline
+   REPORTER 📋 logs the incident (no baseline restore — heals persist)
 ```
 
-Every incident starts from a pristine baseline, so each round is one
-sabotage → one fix: deterministic, repeatable, and never degrades.
-
-### The 7 sabotages
-
-| Sabotage | What it does | The fix |
-|---|---|---|
-| `SCHEMA_RENAME` | `temp`→`temperature`, `city`→`location` | rewrite field access with fallback |
-| `TYPE_CORRUPTION` | temps become `"72.4F"` strings | numeric coercion before transform |
-| `NULL_INJECTION` | `temp: null` on ~30% of rows | filter null-temp rows |
-| `EMPTY_DATA` | file becomes `[]` | restore data from baseline |
-| `MISSING_FILE` | data file deleted | restore data from baseline |
-| `DATE_FORMAT` | ISO → `MM/DD/YYYY HH:MM` | flexible timestamp parsing |
-| `DUPLICATE_ROWS` | every row ×10 | deduplication step |
+**Heals accumulate.** When patch widens `pipeline.py` to handle `temperature` *or* `temp`, that widening stays. The next chaos round meets a more robust pipeline. Over a long demo you watch the system genuinely learn.
 
 ---
 
@@ -73,112 +49,110 @@ git clone https://github.com/BrodyKretz/pipeline-guardian.git
 cd pipeline-guardian
 pip install -r requirements.txt
 
-cp .env.example .env          # optional: add ANTHROPIC_API_KEY for real reasoning
+cp .env.example .env          # optional: ANTHROPIC_API_KEY for AI mode
 
 python main.py                # open http://localhost:8000
 ```
 
-Within a few minutes the Chaos Agent breaks the pipeline and you watch the
-healing chain fix it live.
+For fast demos: `DEMO_FAST=1 python main.py` (15s monitor, 30–60s chaos).
 
-**Fast demo:** `DEMO_FAST=1 python main.py` shrinks the intervals
-(monitor 15s, chaos 30–60s) so a full incident plays out in under a minute.
-
-### Dashboard controls
-
-The dashboard has a live control strip — no terminal needed:
-
-- **▶ Start / ⏸ Pause / ⏹ Stop** — gate all automation (chaos *and* monitor).
-  Pause freezes everything; Stop also clears any active incident and restores
-  the baseline.
-- **MOCK / AI toggle** — switch reasoning mode at runtime. Choosing **AI** with
-  no key on file pops an inline field to paste an `ANTHROPIC_API_KEY`; it's
-  merged into `.env` (git-ignored) and applied immediately.
-
-### Mock mode vs. real Claude
-
-**The system always boots in MOCK.** Real Claude is strictly opt-in — a saved
-key never silently activates it. This keeps startup free, instant, and
-deterministic, and prevents surprise API latency/spend.
-
-- **MOCK (default)** → deterministic mock brain. The full system runs and
-  self-heals. Diagnosis classifies from real observed signals only (it never
-  peeks at which sabotage was applied), so the *choreography* is genuine even
-  though no model is involved. Incidents resolve in milliseconds.
-- **AI (opt-in via the dashboard toggle)** → the two judgment steps (Chaos's
-  sabotage choice, Diagnosis's root-cause classification) reason through Claude
-  via tool use, using the saved `ANTHROPIC_API_KEY`. Each incident now takes
-  real API time (seconds), and — by design — no new sabotage fires while an
-  incident is open, so observed sabotage spacing grows accordingly. Any API
-  error degrades gracefully back to the mock path and the incident escalates
-  rather than crashing.
+The system boots in **MOCK** by design — a saved API key never silently turns on paid calls. Flip to **AI** in the dashboard top bar (paste your key inline if needed).
 
 ---
 
-## Where the intelligence actually is
+## The dashboard
 
-Be clear-eyed about what this is, because "agent" is an overloaded word.
+A single-file vanilla-JS dashboard at `dashboard/index.html`. Two views toggled in the top bar:
 
-**These are six agents in the architectural sense** — six bounded roles, each
-in its own module, isolated, communicating only through the event bus and
-explicit handoffs. By the classical AI definition (perceive an environment,
-act on it toward a goal) every one qualifies, no LLM required.
+**GRAPH view** — agents arranged in a graph at top-left. Each agent lights up when it emits an event; wires animate between sender and receiver. Side panels:
+- *Agent Timing* — change monitor + chaos intervals + model assignments live
+- *Watched Files* — compact diff view of the working files
+- *Live Event Stream* — every event the bus has seen
+- *Incident Status* — current incident + history with resolution rate
 
-**Only two of them call an LLM, and only with a key set:**
+**FILES view** — `data/weather_source.json` and `pipeline.py` shown side-by-side, with **per-agent colored diffs**. Damage flashes red, heals flash in the patching agent's color, restores go neutral. Unhealed damage persists visibly. A small *Pipeline State* panel on the left shows the current incident state in one glance.
 
-| Agent | Uses Claude? | Why |
-|---|---|---|
-| Chaos | ✅ (with key) | *Judgment:* which sabotage is interesting given recent history |
-| Diagnosis | ✅ (with key) | *Judgment:* infer root cause from observed signals |
-| Monitor | ❌ | Run pipeline, check a boolean — deterministic |
-| Patch | ❌ | Known failure type → known fix; a lookup, not a decision |
-| Validator | ❌ | Re-run pipeline, assert row count + schema — deterministic |
-| Reporter | ❌ | Write JSON / SQLite — deterministic |
+**Top-bar controls** include:
+- ▶ Start / ⏸ Pause / ⏹ Stop (Stop is the explicit full reset)
+- ⚡ CHAOS button + category dropdown (fire chaos on demand, optionally biased to schema/type/format/encoding/value/volume/unit/structural drift)
+- MOCK / AI mode toggle
+- GRAPH / FILES view toggle
+- 🙂 export button — copies a markdown session dump (events, files, incidents, current state) to your clipboard for pasting into a Claude conversation
+- Live counters: uptime, incidents, resolution rate, tokens (in/out) + cost estimate
 
-This split is **deliberate, and it's the point**. Putting an LLM behind
-Validator or Reporter would be slower, costlier, non-deterministic, and
-strictly worse than the four lines of code that do the job correctly. The
-intelligence sits exactly where genuine judgment is required and nowhere else.
-Knowing when *not* to reach for a model is the senior decision here — most
-LLM demos bolt one onto everything and become fragile for it.
+---
 
-So: a multi-agent orchestration with LLM-backed reasoning at its two decision
-points — not "six autonomous AI minds," and it doesn't pretend to be.
+## What the AI is blind to
+
+Two pieces of harness ground-truth the agents never receive. This is the spine of the design:
+
+1. **The baseline.** `baseline/weather_source.json` and `baseline/pipeline.py` exist only to seed the system on startup and to provide a manual STOP-button reset. No agent reads them during reasoning. Patch must reconstruct correctness from the *current* files alone.
+2. **Color / damage-vs-heal tags.** The dashboard's per-agent coloring is computed from `FILE_CHANGED` events. Those events are never returned to any AI tool — agents only read raw file text. The diff overlay exists for you, not the model.
+
+The principle: the model has to *find* the problem like a real on-call engineer who wasn't told what changed.
+
+---
+
+## Safety
+
+AI mode runs untrusted generated code. Three guardrails:
+
+- **File whitelist.** Chaos and patch may only write `data/weather_source.json` and `pipeline.py`. Baseline, agent code, `llm.py`, `main.py` — all unreachable.
+- **Subprocess pipeline execution.** Every pipeline run is a fresh `python -c` subprocess with a 10-second timeout. Generated infinite loops or syntax errors surface as ordinary failure results; they cannot wedge the server.
+- **Hard write-guards.** Chaos can't empty the file or grow the record count (no resurrecting dropped stations). Patch can't fabricate records or rewrite over unparseable data — must edit `pipeline.py` or escalate.
+
+---
+
+## Mock mode vs AI mode
+
+|                          | MOCK (default)                                  | AI (opt-in via dashboard)                      |
+| ------------------------ | ----------------------------------------------- | ---------------------------------------------- |
+| API calls                | Zero                                            | Per agent, per incident                        |
+| Chaos                    | Picks one of 7 canned sabotages                 | Invents one creative realistic mutation        |
+| Diagnosis                | Rule-based classifier from observable signals   | Free-form, multi-turn tool loop                |
+| Patch                    | Hardcoded fix per failure type                  | Generative; writes defensive code/data edits   |
+| Validator                | Schema + row-count check                        | AI judges structural integrity                 |
+| Cost                     | $0                                              | ~$0.01–0.05 per incident on Sonnet             |
+| Repeatable               | Yes — every round resolves identically          | No — chaos diversifies, pipeline hardens       |
 
 ---
 
 ## Project layout
 
 ```
-main.py            FastAPI app + APScheduler + WebSocket
-config.py          all constants (model, intervals, thresholds, paths)
-llm.py             Claude tool-use wrapper + deterministic mock brain
-pipeline.py        the ETL pipeline (mutated by chaos/patch at runtime)
-state.py           event bus, incident state, thread→async WS bridge
-restore.py         baseline restore (clean slate per incident)
-baseline/          pristine pipeline.py + 20-record dataset
+main.py            FastAPI app + APScheduler + WebSocket + session-export endpoint
+config.py          paths, thresholds, writable-file whitelist, timing defaults
+llm.py             Claude tool-use loop, per-agent generators, token tracking
+pipeline.py        the ETL pipeline (mutated by chaos / patched by patch at runtime)
+state.py           event bus, incident state, thread→async websocket bridge
+restore.py         baseline reset (startup + STOP button only)
+baseline/          pristine pipeline.py + 20-record 10-field weather dataset
 agents/            chaos, monitor, diagnosis, patch, validator, reporter
-tools/             file / pipeline / log tools + Claude tool schemas
-dashboard/         single-file animated dashboard (no build step)
+tools/             file events, pipeline subprocess runner, Anthropic tool schemas
+dashboard/         single-file vanilla-JS dashboard (no build step)
 incidents/         per-incident JSON + summary.json + SQLite log
-tests/             pytest suite (56 tests)
+tests/             pytest suite (79 tests; AI agents tested with a stubbed client)
+docs/superpowers/  design specs and implementation plans for each major phase
 ```
+
+---
 
 ## Testing
 
 ```bash
-pytest -q     # 56 tests: pipeline, event bus, restore, mock brain, tools,
-              # chaos, full healing-chain e2e (all 7 sabotages), API, controls
+pytest -q     # 79 tests: pipeline, event bus, file-change emitter,
+              # subprocess pipeline, mock + AI agents, full healing chain,
+              # AI-blindness assertion, write-guards, retry-once
 ```
 
-The end-to-end chain is fully verifiable in mock mode with no API key.
-
-## Tech stack
-
-Python 3.11+ · Claude API (tool use) · FastAPI · uvicorn · APScheduler ·
-SQLite · WebSockets · vanilla HTML/CSS/JS · pytest
+AI-agent tests use a scripted `FakeClient` — full coverage with zero live API calls.
 
 ---
 
-*Built as a portfolio project exploring autonomous multi-agent systems,
-adversarial self-healing, and real-time agent observability.*
+## Tech stack
+
+Python 3.12 · Claude API (tool use) · FastAPI · uvicorn · APScheduler · SQLite · WebSockets · vanilla HTML/CSS/JS · pytest
+
+---
+
+*Built as a portfolio exploration of generative multi-agent systems: realistic adversarial chaos engineering, durable AI-authored remediation, live observability with AI-blind overlays, and durable session-export tooling for analyzing agent behavior end-to-end.*
