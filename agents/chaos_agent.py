@@ -2,8 +2,10 @@
 
 import json
 
-from config import DATA_FILE
+import llm
+from config import DATA_FILE, PIPELINE_FILE, WRITABLE_FILES
 from llm import decide_sabotage
+from tools.file_events import emit_file_change, track_changes
 from tools.log_tools import read_incident_log
 
 
@@ -79,10 +81,40 @@ _DESC = {
 }
 
 
+def _ai_chaos(bus):
+    """Creative branch: the model invents and writes one breaking change."""
+
+    def write_fn(path_str, content):
+        target = next(
+            (p for p in WRITABLE_FILES if str(p).endswith(path_str)), None
+        )
+        if target is None:
+            return f"refused: {path_str} is not writable"
+        before = target.read_text() if target.exists() else None
+        target.write_text(content)
+        emit_file_change(bus, "chaos", "damage", target, before, content)
+        return f"wrote {len(content)} chars to {path_str}"
+
+    bus.emit("chaos", "pipeline", "SABOTAGE_PLANNED", "Planning a creative sabotage")
+    note = llm.generate_sabotage(write_fn)
+    bus.last_sabotage = note or "creative"
+    bus.emit(
+        "chaos",
+        "monitor",
+        "SABOTAGE_APPLIED",
+        f"Chaos applied a change ({note})",
+        {"note": note},
+    )
+    return note
+
+
 def run_chaos(bus):
     """Pick + apply one sabotage. No-op if an incident is already active."""
     if bus.incident["active"]:
         return None
+    if llm.USE_REAL:
+        return _ai_chaos(bus)
+
     recent = [i["chaos_sabotage"] for i in read_incident_log(5)]
     sabotage = decide_sabotage(recent)
 
@@ -93,7 +125,8 @@ def run_chaos(bus):
         f"Planning sabotage: {sabotage} — {_DESC[sabotage]}",
         {"sabotage": sabotage},
     )
-    SABOTAGE_FNS[sabotage]()
+    with track_changes(bus, "chaos", "damage", [DATA_FILE, PIPELINE_FILE]):
+        SABOTAGE_FNS[sabotage]()
     bus.last_sabotage = sabotage
     bus.emit(
         "chaos",

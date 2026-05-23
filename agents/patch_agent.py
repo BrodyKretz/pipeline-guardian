@@ -4,8 +4,21 @@ Patches always operate on the pristine baseline pipeline.py (restored after
 every incident), so the string-replacement targets are deterministic.
 """
 
-from config import CONF_DIRECT, CONF_UNVERIFIED
-from tools.pipeline_tools import restore_data_file, rewrite_pipeline_section
+import llm
+from config import CONF_DIRECT, CONF_UNVERIFIED, DATA_FILE, PIPELINE_FILE, WRITABLE_FILES
+from restore import restore_data_only
+from tools.file_events import emit_file_change, track_changes
+
+
+def restore_data_file():
+    restore_data_only()
+
+
+def rewrite_pipeline_section(old_code, new_code):
+    src = PIPELINE_FILE.read_text()
+    if old_code not in src:
+        raise ValueError("old_code not found in pipeline.py")
+    PIPELINE_FILE.write_text(src.replace(old_code, new_code, 1))
 
 _SCHEMA_OLD = (
     'temp_c = round((float(rec["temp"]) - 32) * 5.0 / 9.0, 2)\n'
@@ -56,7 +69,27 @@ def _apply_fix(failure_type):
     raise ValueError(f"no patch strategy for {failure_type}")
 
 
-def run(bus, diag):
+def _ai_patch(bus, diag, feedback=None):
+    """Generative branch: the model reads the files and writes the fix itself."""
+
+    def write_fn(path_str, content):
+        target = next(
+            (p for p in WRITABLE_FILES if str(p).endswith(path_str)), None
+        )
+        if target is None:
+            return f"refused: {path_str} not writable"
+        before = target.read_text() if target.exists() else None
+        target.write_text(content)
+        emit_file_change(bus, "patch", "heal", target, before, content)
+        return f"wrote {len(content)} chars to {path_str}"
+
+    out = llm.generate_patch(diag, write_fn, feedback)
+    summary = out.get("summary", "patch applied")
+    bus.emit("patch", "validator", "PATCH_APPLIED", summary, {"fix": summary})
+    return {"fix": summary}
+
+
+def run(bus, diag, feedback=None):
     ft = diag["failure_type"]
     conf = diag["confidence"]
     bus.emit(
@@ -76,7 +109,11 @@ def run(bus, diag):
         )
         return {"escalated": True}
 
-    fix_desc = _apply_fix(ft)
+    if llm.USE_REAL:
+        return _ai_patch(bus, diag, feedback)
+
+    with track_changes(bus, "patch", "heal", [DATA_FILE, PIPELINE_FILE]):
+        fix_desc = _apply_fix(ft)
     unverified = conf < CONF_DIRECT
     label = fix_desc + (" [UNVERIFIED]" if unverified else "")
     bus.emit(
