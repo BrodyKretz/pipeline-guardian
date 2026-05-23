@@ -172,16 +172,21 @@ def _read_tool(name):
 
 def generate_sabotage(write_fn):
     """Drive Claude to invent ONE breaking change. `write_fn(path, content)`
-    performs the (whitelisted, attributed) write and returns a plain string.
-    Returns the model's free-text note."""
-    captured = {"note": ""}
+    performs the (whitelisted, attributed) write and returns a plain string
+    prefixed with "wrote" on success or "error"/"refused" on rejection.
+    Returns {"applied": bool, "note": str}. `applied` reflects whether a
+    write actually went through — not just whether the model claimed one."""
+    captured = {"note": "", "applied": False}
 
     def executor(name, inp):
         if name == "sabotage_file":
             if "content" not in inp or "path" not in inp:
                 return "error: sabotage_file requires path and content fields"
-            captured["note"] = inp.get("note", "")
-            return write_fn(inp["path"], inp["content"])  # plain string only
+            result = write_fn(inp["path"], inp["content"])
+            if isinstance(result, str) and result.startswith("wrote"):
+                captured["note"] = inp.get("note", "")
+                captured["applied"] = True
+            return result
         return _read_tool(name)
 
     _anthropic_tool_loop(
@@ -209,7 +214,7 @@ def generate_sabotage(write_fn):
         executor,
         final_tool="done",
     )
-    return captured["note"]
+    return {"applied": captured["applied"], "note": captured["note"]}
 
 
 # --------------------------------------------------------------------------- #
