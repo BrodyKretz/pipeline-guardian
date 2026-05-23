@@ -154,10 +154,23 @@
     font:11px/1.5 ui-monospace,monospace;white-space:pre;color:var(--dim);
     margin:0}
   #files{
-    position:fixed;top:88px;bottom:80px;left:50%;transform:translateX(-50%);
-    width:min(1180px,92vw);display:none;gap:18px;padding:0;z-index:10;
+    position:fixed;top:80px;bottom:80px;left:50%;transform:translateX(-50%);
+    width:min(1180px,92vw);display:none;flex-direction:column;
+    gap:14px;padding:0;z-index:10;
   }
   body.view-files #files{display:flex}
+  .fcols{flex:1;display:flex;gap:18px;min-height:0}
+  #agentRow{display:flex;justify-content:center;gap:14px;padding:4px 0 2px}
+  .aSprite{
+    width:44px;height:44px;border-radius:50%;border:2px solid var(--c);
+    background:rgba(255,255,255,.03);display:flex;align-items:center;
+    justify-content:center;font-size:18px;line-height:1;opacity:.45;
+    transition:box-shadow .25s,transform .2s,opacity .2s;cursor:default;
+  }
+  .aSprite.lit{opacity:1;box-shadow:0 0 14px var(--c),0 0 28px var(--c);
+    transform:scale(1.12)}
+  .aSprite.err{border-color:var(--chaos);
+    box-shadow:0 0 14px var(--chaos),0 0 28px var(--chaos)}
   body.view-files #cfg,
   body.view-files #log,
   body.view-files #side,
@@ -218,6 +231,17 @@
       <button class="btn" id="bPause" title="Pause automation">⏸ PAUSE</button>
       <button class="btn" id="bStop" title="Stop &amp; clear incident">⏹ STOP</button>
       <button class="btn" id="bChaos" title="Fire chaos now">⚡ CHAOS</button>
+      <select id="chaosCat" class="btn" title="Sabotage category">
+        <option value="random">random</option>
+        <option value="schema_drift">schema drift</option>
+        <option value="type_drift">type drift</option>
+        <option value="format_drift">format drift</option>
+        <option value="encoding_drift">encoding drift</option>
+        <option value="bad_sensor">bad sensor</option>
+        <option value="volume_drift">volume drift</option>
+        <option value="unit_drift">unit drift</option>
+        <option value="structural_drift">structural drift</option>
+      </select>
     </div>
     <div class="vsep"></div>
     <div class="seg" id="modeSeg">
@@ -261,13 +285,16 @@ for pasting into a Claude conversation">🙂</button>
   </div>
 
   <div id="files">
-    <div class="fcol">
-      <h4>data/weather_source.json</h4>
-      <pre id="fileView_data"></pre>
-    </div>
-    <div class="fcol">
-      <h4>pipeline.py</h4>
-      <pre id="fileView_pipe"></pre>
+    <div id="agentRow"></div>
+    <div class="fcols">
+      <div class="fcol">
+        <h4>data/weather_source.json</h4>
+        <pre id="fileView_data"></pre>
+      </div>
+      <div class="fcol">
+        <h4>pipeline.py</h4>
+        <pre id="fileView_pipe"></pre>
+      </div>
     </div>
   </div>
 
@@ -382,6 +409,32 @@ function renderSplit(){
 }
 
 function renderFile(){renderPanel();renderSplit();}
+
+// ---- agent sprite row (FILES view) ----
+const FILE_AGENTS=['chaos','monitor','diagnosis','patch','validator','reporter'];
+function buildAgentRow(){
+  const row=document.getElementById('agentRow');
+  row.replaceChildren();
+  FILE_AGENTS.forEach(a=>{
+    const s=el('div','aSprite',ICON[a]);
+    s.id='aSprite_'+a;
+    s.style.setProperty('--c',COLORS[a]);
+    s.title=a.toUpperCase();
+    row.appendChild(s);
+  });
+}
+buildAgentRow();
+
+function pulseAgentSprite(name, isErr){
+  const s=document.getElementById('aSprite_'+name);
+  if(!s)return;
+  s.classList.add('lit');
+  s.classList.toggle('err',!!isErr);
+  clearTimeout(s._tmr);
+  s._tmr=setTimeout(()=>{
+    s.classList.remove('lit');s.classList.remove('err');
+  },1800);
+}
 
 // ---- compact pipeline-state panel (visible in FILES view) ----
 function _setErr(badgeCls, label, cause, stage){
@@ -536,6 +589,11 @@ function setHealth(ok){
 let curIncident=false;
 function handle(ev){
   if(ev.type==='SYSTEM_RESET')resetUI();
+  // light up the FILES-view agent sprite for every event from a real agent
+  if(FILE_AGENTS.includes(ev.from_agent)){
+    pulseAgentSprite(ev.from_agent,
+      /ERROR|ESCALATE|FAIL|FAILURE|ABORTED/.test(ev.type));
+  }
   if(ev.type==='FILE_CHANGED'){
     fileChangeAgent=ev.from_agent;
     applyFileChange(ev.data);
@@ -715,8 +773,12 @@ bStop.onclick=()=>control('stop');
 document.getElementById('bChaos').onclick=async()=>{
   const b=document.getElementById('bChaos');
   const orig=b.textContent;
+  const cat=document.getElementById('chaosCat').value||'random';
   try{
-    const r=await fetch('/api/chaos/trigger',{method:'POST'});
+    const r=await fetch('/api/chaos/trigger',{
+      method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({category:cat})
+    });
     if(r.ok){b.textContent='⚡ FIRED';setTimeout(()=>{b.textContent=orig;},1800);}
     else{const j=await r.json();b.textContent='⚠ '+(j.reason||'err');
          setTimeout(()=>{b.textContent=orig;},2400);}

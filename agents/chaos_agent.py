@@ -77,7 +77,7 @@ _DESC = {
 }
 
 
-def _ai_chaos(bus):
+def _ai_chaos(bus, category=None):
     """Creative branch: the model invents and writes one breaking change.
 
     Hard guards enforce the "realistic upstream failures only" constraint:
@@ -138,7 +138,9 @@ def _ai_chaos(bus):
         for i in read_incident_log(8)
         if i.get("chaos_sabotage")
     ]
-    result = llm.generate_sabotage(write_fn, recent_notes=recent_notes)
+    result = llm.generate_sabotage(
+        write_fn, recent_notes=recent_notes, category=category
+    )
     if not result["applied"]:
         # Model planned but never produced a valid write (guards refused, or it
         # gave up). Be honest: no SABOTAGE_APPLIED, monitor will see healthy.
@@ -162,12 +164,13 @@ def _ai_chaos(bus):
     return note
 
 
-def run_chaos(bus):
-    """Pick + apply one sabotage. No-op if an incident is already active."""
+def run_chaos(bus, category=None):
+    """Pick + apply one sabotage. No-op if an incident is already active.
+    Optional `category` biases the AI chaos toward a specific failure class."""
     if bus.incident["active"]:
         return None
     if llm.USE_REAL:
-        return _ai_chaos(bus)
+        return _ai_chaos(bus, category=category)
 
     recent = [i["chaos_sabotage"] for i in read_incident_log(5)]
     sabotage = decide_sabotage(recent)

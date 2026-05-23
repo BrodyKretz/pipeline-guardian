@@ -344,10 +344,25 @@ def api_incidents():
     return JSONResponse({"summary": summary, "recent": recent})
 
 
+CHAOS_CATEGORIES = [
+    "random", "schema_drift", "type_drift", "format_drift", "encoding_drift",
+    "bad_sensor", "volume_drift", "unit_drift", "structural_drift",
+]
+
+
+class ChaosReq(BaseModel):
+    category: str = "random"
+
+
 @app.post("/api/chaos/trigger")
-def api_chaos_trigger():
+def api_chaos_trigger(req: ChaosReq = ChaosReq()):
     """Fire chaos immediately, regardless of automation state. Runs in a
     one-shot scheduler job so HTTP doesn't block on the AI tool loop."""
+    if req.category not in CHAOS_CATEGORIES:
+        return JSONResponse(
+            {"ok": False, "reason": f"unknown category: {req.category}"},
+            status_code=400,
+        )
     if bus.incident["active"]:
         return JSONResponse(
             {"ok": False, "reason": "incident already active"}, status_code=409
@@ -356,14 +371,15 @@ def api_chaos_trigger():
         return JSONResponse(
             {"ok": False, "reason": "scheduler not running"}, status_code=503
         )
+    cat = None if req.category == "random" else req.category
     scheduler.add_job(
-        lambda: run_chaos(bus),
+        lambda: run_chaos(bus, category=cat),
         "date",
         run_date=datetime.now(),
         id="chaos_manual",
         replace_existing=True,
     )
-    return JSONResponse({"ok": True})
+    return JSONResponse({"ok": True, "category": req.category})
 
 
 @app.get("/api/session-export", response_class=PlainTextResponse)
