@@ -132,7 +132,13 @@ def _ai_chaos(bus):
         return f"wrote {len(content)} chars to {path_str}"
 
     bus.emit("chaos", "pipeline", "SABOTAGE_PLANNED", "Planning a creative sabotage")
-    result = llm.generate_sabotage(write_fn)
+    # Feed the model its recent history so it self-diversifies across rounds.
+    recent_notes = [
+        i.get("chaos_sabotage", "")
+        for i in read_incident_log(8)
+        if i.get("chaos_sabotage")
+    ]
+    result = llm.generate_sabotage(write_fn, recent_notes=recent_notes)
     if not result["applied"]:
         # Model planned but never produced a valid write (guards refused, or it
         # gave up). Be honest: no SABOTAGE_APPLIED, monitor will see healthy.
