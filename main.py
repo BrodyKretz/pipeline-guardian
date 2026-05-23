@@ -81,6 +81,8 @@ def _status():
         "has_key": _has_key(),
         "timing": TIMING,
         "model": llm.MODEL,
+        "model_chaos": llm.MODEL_CHAOS,
+        "model_patch": llm.MODEL_PATCH,
         "models": MODELS,
         "tokens": dict(llm.TOKEN_USAGE),
     }
@@ -314,6 +316,7 @@ def api_timing(req: TimingReq):
 
 class ModelReq(BaseModel):
     model: str
+    agent: str = "default"  # "default" | "chaos" | "patch"
 
 
 @app.post("/api/model")
@@ -323,10 +326,16 @@ def api_model(req: ModelReq):
             {"error": f"unknown model {req.model}", **_status()},
             status_code=400,
         )
-    llm.MODEL = req.model
-    bus.emit(
-        "system", "system", "MODEL_CHANGED", f"Claude model set to {req.model}"
-    )
+    if req.agent == "chaos":
+        llm.MODEL_CHAOS = req.model
+        label = f"chaos model -> {req.model}"
+    elif req.agent == "patch":
+        llm.MODEL_PATCH = req.model
+        label = f"patch model -> {req.model}"
+    else:
+        llm.MODEL = req.model
+        label = f"default model -> {req.model}"
+    bus.emit("system", "system", "MODEL_CHANGED", label)
     return JSONResponse(_status())
 
 
