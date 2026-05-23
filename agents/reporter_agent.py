@@ -1,12 +1,10 @@
-"""Reporter Agent — logs and summarizes every incident, then resets state."""
+"""Reporter Agent — logs and summarizes every incident. Heals persist."""
 
 import json
 import uuid
 from datetime import datetime, timezone
 
-from config import DATA_FILE, INCIDENTS_DIR, PIPELINE_FILE, SUMMARY_FILE
-from restore import restore_all
-from tools.file_events import emit_file_change
+from config import INCIDENTS_DIR, SUMMARY_FILE
 from tools.log_tools import write_incident_log
 
 
@@ -73,13 +71,7 @@ def run(bus, *, resolved, diag, fix):
         {"resolved": resolved, "duration": record["duration_seconds"]},
     )
     bus.close_incident()
-    before = {
-        p: (p.read_text() if p.exists() else None)
-        for p in (DATA_FILE, PIPELINE_FILE)
-    }
-    restore_all()
-    for p in (DATA_FILE, PIPELINE_FILE):
-        after = p.read_text()
-        if after != before[p]:
-            emit_file_change(bus, "reporter", "restore", p, before[p], after)
+    # Heals stick: do NOT restore files between incidents. The pipeline
+    # genuinely hardens over time as patch's fixes accumulate. The STOP
+    # button is the explicit reset; server startup also restores baseline.
     return record

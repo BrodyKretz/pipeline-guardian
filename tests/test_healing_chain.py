@@ -2,7 +2,7 @@ import pytest
 
 from agents import monitor_agent
 from agents.chaos_agent import SABOTAGE_FNS
-from config import BASELINE_DIR, DATA_FILE, PIPELINE_FILE, SABOTAGE_TYPES
+from config import SABOTAGE_TYPES
 from restore import restore_all
 from state import EventBus
 
@@ -36,12 +36,9 @@ def test_full_chain_resolves_each_sabotage(sabotage):
     diag = [e for e in bus.events if e["type"] == "DIAGNOSIS_COMPLETE"][0]
     assert diag["data"]["failure_type"] == sabotage
 
-    # Incident closed and BOTH working files restored to baseline.
+    # Incident closed cleanly. Heals persist between incidents — we do NOT
+    # restore baseline anymore. Files may be in their patched state.
     assert bus.incident["active"] is False
-    assert DATA_FILE.read_bytes() == (
-        BASELINE_DIR / "weather_source.json"
-    ).read_bytes()
-    assert PIPELINE_FILE.read_bytes() == (BASELINE_DIR / "pipeline.py").read_bytes()
 
 
 def test_healthy_pipeline_opens_no_incident():
