@@ -8,6 +8,7 @@ import llm
 from config import CONF_DIRECT, CONF_UNVERIFIED, DATA_FILE, PIPELINE_FILE, WRITABLE_FILES
 from restore import restore_data_only
 from tools.file_events import emit_file_change, track_changes
+from tools.log_tools import read_incident_log
 
 
 def restore_data_file():
@@ -117,7 +118,14 @@ def _ai_patch(bus, diag, feedback=None):
         emit_file_change(bus, "patch", "heal", target, before, content)
         return f"wrote {len(content)} chars to {path_str}"
 
-    out = llm.generate_patch(diag, write_fn, feedback)
+    recent_fixes = [
+        i.get("fix_applied", "")
+        for i in read_incident_log(8)
+        if i.get("fix_applied")
+        and i.get("fix_applied") != "none — escalated at diagnosis"
+        and i.get("fix_applied") != "none — escalated at patch"
+    ]
+    out = llm.generate_patch(diag, write_fn, feedback, recent_fixes=recent_fixes)
     summary = out.get("summary", "patch applied")
     bus.emit("patch", "validator", "PATCH_APPLIED", summary, {"fix": summary})
     return {"fix": summary}

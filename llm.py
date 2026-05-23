@@ -303,10 +303,11 @@ def diagnose(pipeline_error):
         }
 
 
-def generate_patch(diag, write_fn, feedback=None):
+def generate_patch(diag, write_fn, feedback=None, recent_fixes=None):
     """Drive Claude to read files and write a fix. `write_fn(path, content)`
-    performs the attributed heal write and returns a plain string. Returns
-    {"summary": str}."""
+    performs the attributed heal write and returns a plain string.
+    `recent_fixes` is a list of recent patch summaries so the model can
+    build on prior hardening instead of undoing it. Returns {"summary": str}."""
 
     def executor(name, inp):
         if name == "write_file":
@@ -318,22 +319,42 @@ def generate_patch(diag, write_fn, feedback=None):
         return _read_tool(name)
 
     extra = f"\nA previous attempt failed validation: {feedback}" if feedback else ""
+    history_block = ""
+    if recent_fixes:
+        history_block = (
+            "\n\nRECENT PATCH HISTORY — the pipeline has already accumulated "
+            "these fixes. Build on them; DO NOT undo or invert them:\n"
+        )
+        for i, f in enumerate(recent_fixes[:6], 1):
+            short = (f[:240] + "…") if len(f) > 240 else f
+            history_block += f"  {i}. {short}\n"
+
     return _anthropic_tool_loop(
         "You are a self-healing agent for a weather ETL whose upstream feed "
-        "just drifted (schema/type/format/value drift, duplicates, etc.). "
-        "Read both files, find the fault, and apply ONE of these fixes:\n"
+        "just drifted. Read both files, find the fault, and apply ONE fix:\n"
         "  (a) Edit pipeline.py so it tolerates the new upstream shape — "
         "preferred for schema/format/type drift.\n"
-        "  (b) Clean, clamp, or filter values in the existing data (drop bad "
-        "rows, clamp out-of-range, dedupe).\n"
-        "You may dry_run to verify your fix before submitting.\n\n"
+        "  (b) Clean, clamp, or filter values in the existing data (drop "
+        "bad rows, clamp out-of-range, dedupe).\n"
+        "You may dry_run to verify before submitting.\n\n"
+        "PREFER DEFENSIVE FIXES OVER MINIMAL SWAPS.\n"
+        "If chaos renamed `temp` → `temperature`, DO NOT just swap the "
+        "lookup to `rec[\"temperature\"]` — that re-breaks the moment the "
+        "feed reverts or the next drift hits. Instead use a tolerant "
+        "pattern like `rec.get(\"temp\", rec.get(\"temperature\"))` so the "
+        "pipeline handles BOTH schemas. Same principle for type drift "
+        "(coerce via a helper that accepts multiple types), format drift "
+        "(branch on input shape), unit drift (detect the unit). Each heal "
+        "must leave the pipeline STRICTLY MORE TOLERANT than before — "
+        "never less. The goal is durable hardening that accumulates, "
+        "not a one-shot patch that bounces back on the next drift.\n\n"
         "HARD RULES:\n"
-        "  • NEVER invent records that weren't in the source data. Cleaning "
-        "and filtering existing rows is fine — fabricating new ones is not.\n"
-        "  • If the data is fundamentally unrecoverable from itself, edit "
-        "pipeline.py to handle the drift, or submit_patch with a low "
-        "confidence note and escalate. Do NOT fake data to make tests pass.\n"
-        "  • Do not assume any baseline/reference exists." + extra,
+        "  • NEVER invent records that weren't in the source data. Cleaning, "
+        "filtering, clamping is fine — fabricating new ones is not.\n"
+        "  • If the data is unrecoverable, edit pipeline.py or escalate. Do "
+        "NOT fake data to make tests pass.\n"
+        "  • Do not assume any baseline/reference exists." + extra
+        + history_block,
         f"Diagnosis: {diag.get('reasoning', '')}. Fix it, then submit_patch.",
         PATCH_TOOLS,
         executor,
