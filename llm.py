@@ -111,6 +111,37 @@ def _make_client():
     return anthropic.Anthropic()
 
 
+# Per-session API usage. Accumulates across every _anthropic_tool_loop call;
+# reset on STOP (via reset_token_usage()) and on server restart.
+TOKEN_USAGE = {
+    "input": 0,
+    "output": 0,
+    "cache_read": 0,
+    "cache_creation": 0,
+    "calls": 0,
+}
+
+
+def reset_token_usage():
+    for k in TOKEN_USAGE:
+        TOKEN_USAGE[k] = 0
+
+
+def _record_usage(resp):
+    u = getattr(resp, "usage", None)
+    if u is None:
+        return
+    TOKEN_USAGE["input"] += int(getattr(u, "input_tokens", 0) or 0)
+    TOKEN_USAGE["output"] += int(getattr(u, "output_tokens", 0) or 0)
+    TOKEN_USAGE["cache_read"] += int(
+        getattr(u, "cache_read_input_tokens", 0) or 0
+    )
+    TOKEN_USAGE["cache_creation"] += int(
+        getattr(u, "cache_creation_input_tokens", 0) or 0
+    )
+    TOKEN_USAGE["calls"] += 1
+
+
 def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_turns=8):
     client = _make_client()
     messages = [{"role": "user", "content": user}]
@@ -124,6 +155,7 @@ def _anthropic_tool_loop(system, user, tools, tool_executor, final_tool, max_tur
             tools=tools,
             messages=messages,
         )
+        _record_usage(resp)
         tool_results = []
         final = None
         for block in resp.content:

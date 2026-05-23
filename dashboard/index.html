@@ -224,6 +224,10 @@
     <div class="stat"><span class="k">Uptime</span><span class="v" id="uptime">0s</span></div>
     <div class="stat"><span class="k">Incidents</span><span class="v" id="total">0</span></div>
     <div class="stat"><span class="k">Resolution</span><span class="v" id="rate">—</span></div>
+    <div class="stat" title="Anthropic API tokens consumed this session (AI mode)">
+      <span class="k">Tokens (in / out)</span>
+      <span class="v" id="tokens">— / —</span>
+    </div>
 
     <div class="vsep"></div>
     <div class="ctrl">
@@ -700,6 +704,20 @@ function applyCfg(s){
   if(s.model && document.activeElement!==tModel)tModel.value=s.model;
 }
 
+function fmtTok(n){
+  if(n>=1000000)return (n/1000000).toFixed(2)+'M';
+  if(n>=1000)return (n/1000).toFixed(1)+'k';
+  return String(n);
+}
+function applyTokens(t){
+  const el=document.getElementById('tokens');
+  if(!t || (t.input===0 && t.output===0)){el.textContent='— / —';return;}
+  el.textContent=`${fmtTok(t.input)} / ${fmtTok(t.output)}`;
+  el.title=`input=${t.input}, output=${t.output}, `+
+           `cache_read=${t.cache_read||0}, `+
+           `cache_creation=${t.cache_creation||0}, calls=${t.calls||0}`;
+}
+
 function applyStatus(s){
   if(!s)return;
   runState=s.run_state;
@@ -713,6 +731,7 @@ function applyStatus(s){
   mAi.classList.toggle('sel',ai);
   mMock.classList.toggle('sel',!ai);
   applyCfg(s);
+  applyTokens(s.tokens);
 }
 
 async function applyCfgClick(){
@@ -838,6 +857,7 @@ async function initStatus(){
   try{applyStatus(await(await fetch('/api/state')).json());}catch(e){}
 }
 initStatus();
+setInterval(initStatus, 3000);  // keeps tokens + run-state fresh during AI runs
 
 function connect(){
   const ws=new WebSocket(`ws://${location.host}/ws`);
