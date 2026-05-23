@@ -170,10 +170,13 @@ def _read_tool(name):
     return {"error": "unknown tool"}
 
 
-def generate_sabotage(write_fn):
+def generate_sabotage(write_fn, recent_notes=None):
     """Drive Claude to invent ONE breaking change. `write_fn(path, content)`
     performs the (whitelisted, attributed) write and returns a plain string
     prefixed with "wrote" on success or "error"/"refused" on rejection.
+    `recent_notes` is a list of recent chaos notes the model should NOT
+    repeat (enforces variety across rounds).
+
     Returns {"applied": bool, "note": str}. `applied` reflects whether a
     write actually went through — not just whether the model claimed one."""
     captured = {"note": "", "applied": False}
@@ -189,25 +192,38 @@ def generate_sabotage(write_fn):
             return result
         return _read_tool(name)
 
+    history_block = ""
+    if recent_notes:
+        history_block = (
+            "\n\nRECENT CHAOS HISTORY (you must NOT repeat any of these "
+            "patterns — pick something different in category AND in specifics):\n"
+        )
+        for i, n in enumerate(recent_notes[:6], 1):
+            short = (n[:200] + "…") if len(n) > 200 else n
+            history_block += f"  {i}. {short}\n"
+
     _anthropic_tool_loop(
         "You simulate REALISTIC upstream failures in a weather data feed — the "
-        "kind that actually happen in production ETLs when an API version bumps "
-        "or a sensor misbehaves. Your job: mutate data/weather_source.json in "
-        "ONE small way that resembles a real upstream change.\n\n"
-        "Realistic categories you may simulate (pick ONE):\n"
-        "  • Schema drift — rename a field (e.g. temp → temperature), drop an "
-        "optional field\n"
-        "  • Type drift — numbers arrive as strings, ints as floats\n"
-        "  • Format drift — ISO timestamps become epoch seconds or MM/DD/YYYY\n"
-        "  • Bad sensor reading — out-of-range value (e.g. humidity > 100), "
-        "null in a required field\n"
-        "  • Duplicate records (upstream retry/pagination bug)\n"
-        "  • Unit-of-measure change (Fahrenheit → Celsius without warning)\n"
-        "  • Structure change (wrap the list in a top-level dict, etc.)\n\n"
+        "kind that actually happen in production ETLs when a vendor API changes "
+        "or a sensor misbehaves. Mutate data/weather_source.json in ONE small "
+        "way. INVENT the specifics yourself — do not echo familiar examples.\n\n"
+        "Pick ONE abstract failure class and invent your own concrete variant:\n"
+        "  • Schema drift — a field is renamed, dropped, or added\n"
+        "  • Type drift — a field's runtime type shifts\n"
+        "  • Format drift — a field's serialization format shifts\n"
+        "  • Encoding drift — case, whitespace, unicode, or character set shifts\n"
+        "  • Bad sensor reading — an out-of-range or null value appears\n"
+        "  • Volume drift — records get duplicated, partially fetched, reordered\n"
+        "  • Unit drift — a numeric field switches measurement system\n"
+        "  • Structural drift — the container shape changes\n\n"
+        "Be genuinely creative. The MOST INTERESTING sabotages are subtle, "
+        "novel, or affect only some records. Avoid the obvious textbook "
+        "examples (ISO↔epoch, temp↔temperature) unless you make them weird.\n\n"
         "You MUST NOT:\n"
-        "  • Empty the file (no `[]`, no whitespace-only content)\n"
-        "  • Edit pipeline.py — deploy-time concerns are not upstream failures\n\n"
-        "Apply ONE change via sabotage_file, then call done.",
+        "  • Empty the file or grow the record count\n"
+        "  • Edit pipeline.py (deploy-time concerns are not upstream failures)"
+        + history_block
+        + "\n\nApply ONE change via sabotage_file, then call done.",
         "Investigate the data feed, then simulate one realistic upstream "
         "failure on data/weather_source.json.",
         CHAOS_TOOLS,
