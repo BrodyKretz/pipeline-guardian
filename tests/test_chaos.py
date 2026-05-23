@@ -29,10 +29,13 @@ def test_run_chaos_emits_planned_then_applied(monkeypatch):
     sabotage = run_chaos(bus)
     assert sabotage in SABOTAGE_TYPES
     types = [e["type"] for e in bus.events]
-    assert types == ["SABOTAGE_PLANNED", "SABOTAGE_APPLIED"]
-    assert bus.events[0]["from_agent"] == "chaos"
-    assert bus.events[0]["to_agent"] == "pipeline"
-    assert bus.events[1]["to_agent"] == "monitor"
+    comms = [t for t in types if t != "FILE_CHANGED"]
+    assert comms == ["SABOTAGE_PLANNED", "SABOTAGE_APPLIED"]
+    planned = [e for e in bus.events if e["type"] == "SABOTAGE_PLANNED"][0]
+    applied = [e for e in bus.events if e["type"] == "SABOTAGE_APPLIED"][0]
+    assert planned["from_agent"] == "chaos"
+    assert planned["to_agent"] == "pipeline"
+    assert applied["to_agent"] == "monitor"
     assert bus.last_sabotage == sabotage
 
 

@@ -4,8 +4,9 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-from config import INCIDENTS_DIR, SUMMARY_FILE
+from config import DATA_FILE, INCIDENTS_DIR, PIPELINE_FILE, SUMMARY_FILE
 from restore import restore_all
+from tools.file_events import emit_file_change
 from tools.log_tools import write_incident_log
 
 
@@ -72,5 +73,13 @@ def run(bus, *, resolved, diag, fix):
         {"resolved": resolved, "duration": record["duration_seconds"]},
     )
     bus.close_incident()
+    before = {
+        p: (p.read_text() if p.exists() else None)
+        for p in (DATA_FILE, PIPELINE_FILE)
+    }
     restore_all()
+    for p in (DATA_FILE, PIPELINE_FILE):
+        after = p.read_text()
+        if after != before[p]:
+            emit_file_change(bus, "reporter", "restore", p, before[p], after)
     return record

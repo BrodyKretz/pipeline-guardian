@@ -17,6 +17,9 @@ DATA_FILE = ROOT / "data" / "weather_source.json"
 OUTPUT_FILE = ROOT / "output" / "daily_summary.json"
 PIPELINE_FILE = ROOT / "pipeline.py"
 BASELINE_DIR = ROOT / "baseline"
+
+WRITABLE_FILES = {DATA_FILE, PIPELINE_FILE}  # only files agents may mutate
+PIPELINE_TIMEOUT_SEC = 10
 INCIDENTS_DIR = ROOT / "incidents"
 SUMMARY_FILE = INCIDENTS_DIR / "summary.json"
 DB_FILE = INCIDENTS_DIR / "incidents.db"
