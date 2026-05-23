@@ -68,21 +68,21 @@
   #stage{position:fixed;inset:56px 0 0 0}
   svg#wires{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
   .node{
-    position:absolute;width:96px;height:96px;margin:-48px 0 0 -48px;border-radius:50%;
+    position:absolute;width:72px;height:72px;margin:-36px 0 0 -36px;border-radius:50%;
     display:flex;flex-direction:column;align-items:center;justify-content:center;
     background:rgba(255,255,255,.03);border:2px solid var(--c);
     transition:box-shadow .25s,transform .2s;
   }
-  .node .ic{font-size:30px;line-height:1}
-  .node .nm{font-size:10px;letter-spacing:1.5px;margin-top:3px;color:var(--c);font-weight:700}
-  .node.big{width:118px;height:118px;margin:-59px 0 0 -59px}
-  .node.big .ic{font-size:38px}
+  .node .ic{font-size:22px;line-height:1}
+  .node .nm{font-size:9px;letter-spacing:1px;margin-top:2px;color:var(--c);font-weight:700}
+  .node.big{width:88px;height:88px;margin:-44px 0 0 -44px}
+  .node.big .ic{font-size:28px}
   .node .last{
-    position:absolute;top:104%;width:170px;text-align:center;font-size:10px;
+    position:absolute;top:106%;width:140px;text-align:center;font-size:9px;
     color:var(--dim);left:50%;transform:translateX(-50%);
     white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   }
-  .node.big .last{top:108%}
+  .node.big .last{top:110%}
   .node.idle{box-shadow:0 0 10px rgba(255,255,255,.04)}
   .node.active{box-shadow:0 0 26px var(--c),0 0 60px var(--c);transform:scale(1.06)}
   .node.error{box-shadow:0 0 26px var(--chaos),0 0 60px var(--chaos);
@@ -217,6 +217,7 @@
       <button class="btn" id="bStart" title="Start / resume automation">▶ START</button>
       <button class="btn" id="bPause" title="Pause automation">⏸ PAUSE</button>
       <button class="btn" id="bStop" title="Stop &amp; clear incident">⏹ STOP</button>
+      <button class="btn" id="bChaos" title="Fire chaos now">⚡ CHAOS</button>
     </div>
     <div class="vsep"></div>
     <div class="seg" id="modeSeg">
@@ -438,7 +439,7 @@ function el(tag,cls,txt){
 
 function place(){
   const w=stage.clientWidth,h=stage.clientHeight;
-  const cx=w/2,cy=h/2,R=Math.min(w,h)*0.33;
+  const cx=w/2,cy=h/2,R=Math.min(w,h)*0.24;
   RING.forEach((name,i)=>{
     const ang=-Math.PI/2 + i*(2*Math.PI/RING.length);
     pos(name,cx+R*Math.cos(ang),cy+R*Math.sin(ang));
@@ -711,6 +712,16 @@ async function control(action){
 bStart.onclick=()=>control('start');
 bPause.onclick=()=>control('pause');
 bStop.onclick=()=>control('stop');
+document.getElementById('bChaos').onclick=async()=>{
+  const b=document.getElementById('bChaos');
+  const orig=b.textContent;
+  try{
+    const r=await fetch('/api/chaos/trigger',{method:'POST'});
+    if(r.ok){b.textContent='⚡ FIRED';setTimeout(()=>{b.textContent=orig;},1800);}
+    else{const j=await r.json();b.textContent='⚠ '+(j.reason||'err');
+         setTimeout(()=>{b.textContent=orig;},2400);}
+  }catch(e){b.textContent='⚠ failed';setTimeout(()=>{b.textContent=orig;},2400);}
+};
 document.getElementById('vGraph').onclick=()=>showView('graph');
 document.getElementById('vFiles').onclick=()=>showView('files');
 
