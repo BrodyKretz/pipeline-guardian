@@ -102,6 +102,102 @@ def test_ai_chaos_rejects_non_whitelisted_path(monkeypatch):
     assert "x=1" not in pathlib.Path("llm.py").read_text()
 
 
+def test_ai_chaos_rejects_emptying_the_data(monkeypatch):
+    from agents.chaos_agent import run_chaos
+    from config import DATA_FILE
+
+    original = DATA_FILE.read_text()
+    script = [
+        FakeResp(
+            [
+                FakeBlock(
+                    "sabotage_file",
+                    {
+                        "path": "data/weather_source.json",
+                        "content": "[]",
+                        "note": "wipe the feed",
+                    },
+                )
+            ]
+        ),
+        FakeResp([FakeBlock("done", {})]),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    run_chaos(bus)
+    assert DATA_FILE.read_text() == original  # guard refused the empty write
+
+
+def test_ai_chaos_rejects_pipeline_edit(monkeypatch):
+    from agents.chaos_agent import run_chaos
+    from config import PIPELINE_FILE
+
+    original = PIPELINE_FILE.read_text()
+    script = [
+        FakeResp(
+            [
+                FakeBlock(
+                    "sabotage_file",
+                    {
+                        "path": "pipeline.py",
+                        "content": "def run(): pass",
+                        "note": "introduce a bug",
+                    },
+                )
+            ]
+        ),
+        FakeResp([FakeBlock("done", {})]),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    run_chaos(bus)
+    assert PIPELINE_FILE.read_text() == original  # guard refused code edit
+
+
+def test_ai_patch_refuses_to_fabricate_records(monkeypatch):
+    import json as _json
+
+    from agents import patch_agent
+    from config import DATA_FILE
+
+    # current data has 20 records (baseline); patch must not grow that.
+    fabricated = _json.dumps([{"city": "X", "temp": 0, "humidity": 0,
+                                "timestamp": "2026-01-01T00:00:00"}] * 30)
+    script = [
+        FakeResp([FakeBlock("write_file", {"path": "data/weather_source.json",
+                                            "content": fabricated})]),
+        FakeResp([FakeBlock("submit_patch", {"summary": "tried to fabricate"})]),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    before = DATA_FILE.read_text()
+    patch_agent.run(
+        bus,
+        {"failure_type": "x", "confidence": 0.9, "reasoning": "r", "suggested_fix": "f"},
+    )
+    assert DATA_FILE.read_text() == before  # guard refused row inflation
+
+
+def test_ai_patch_refuses_data_rewrite_when_current_unparseable(monkeypatch):
+    from agents import patch_agent
+    from config import DATA_FILE
+
+    DATA_FILE.write_text("this is not json")
+    script = [
+        FakeResp([FakeBlock("write_file", {"path": "data/weather_source.json",
+                                            "content": "[]"})]),
+        FakeResp([FakeBlock("submit_patch", {"summary": "tried to rewrite"})]),
+    ]
+    monkeypatch.setattr("llm._make_client", lambda: FakeClient(script))
+    bus = EventBus()
+    patch_agent.run(
+        bus,
+        {"failure_type": "x", "confidence": 0.9, "reasoning": "r", "suggested_fix": "f"},
+    )
+    # data is still the garbage chaos created — patch refused to fabricate over it
+    assert DATA_FILE.read_text() == "this is not json"
+
+
 def test_ai_diagnose_returns_freeform_shape(monkeypatch):
     script = [
         FakeResp([FakeBlock("read_data", {})]),

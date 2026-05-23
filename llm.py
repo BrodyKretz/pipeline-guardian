@@ -185,11 +185,26 @@ def generate_sabotage(write_fn):
         return _read_tool(name)
 
     _anthropic_tool_loop(
-        "You are a chaos engineering agent attacking a weather ETL. Inspect the "
-        "data and pipeline, then introduce ONE small, plausible breaking change "
-        "to exactly ONE file via sabotage_file. Keep it subtle and realistic. "
-        "Call done when finished.",
-        "Investigate, then sabotage one file.",
+        "You simulate REALISTIC upstream failures in a weather data feed — the "
+        "kind that actually happen in production ETLs when an API version bumps "
+        "or a sensor misbehaves. Your job: mutate data/weather_source.json in "
+        "ONE small way that resembles a real upstream change.\n\n"
+        "Realistic categories you may simulate (pick ONE):\n"
+        "  • Schema drift — rename a field (e.g. temp → temperature), drop an "
+        "optional field\n"
+        "  • Type drift — numbers arrive as strings, ints as floats\n"
+        "  • Format drift — ISO timestamps become epoch seconds or MM/DD/YYYY\n"
+        "  • Bad sensor reading — out-of-range value (e.g. humidity > 100), "
+        "null in a required field\n"
+        "  • Duplicate records (upstream retry/pagination bug)\n"
+        "  • Unit-of-measure change (Fahrenheit → Celsius without warning)\n"
+        "  • Structure change (wrap the list in a top-level dict, etc.)\n\n"
+        "You MUST NOT:\n"
+        "  • Empty the file (no `[]`, no whitespace-only content)\n"
+        "  • Edit pipeline.py — deploy-time concerns are not upstream failures\n\n"
+        "Apply ONE change via sabotage_file, then call done.",
+        "Investigate the data feed, then simulate one realistic upstream "
+        "failure on data/weather_source.json.",
         CHAOS_TOOLS,
         executor,
         final_tool="done",
@@ -283,10 +298,21 @@ def generate_patch(diag, write_fn, feedback=None):
 
     extra = f"\nA previous attempt failed validation: {feedback}" if feedback else ""
     return _anthropic_tool_loop(
-        "You repair a broken weather ETL. Read the data and pipeline, find the "
-        "fault, and WRITE a fix (to the data and/or pipeline.py) so the pipeline "
-        "produces clean, consistent rows. You may dry_run to check your fix. Do "
-        "not assume any reference or baseline exists — reason from the files." + extra,
+        "You are a self-healing agent for a weather ETL whose upstream feed "
+        "just drifted (schema/type/format/value drift, duplicates, etc.). "
+        "Read both files, find the fault, and apply ONE of these fixes:\n"
+        "  (a) Edit pipeline.py so it tolerates the new upstream shape — "
+        "preferred for schema/format/type drift.\n"
+        "  (b) Clean, clamp, or filter values in the existing data (drop bad "
+        "rows, clamp out-of-range, dedupe).\n"
+        "You may dry_run to verify your fix before submitting.\n\n"
+        "HARD RULES:\n"
+        "  • NEVER invent records that weren't in the source data. Cleaning "
+        "and filtering existing rows is fine — fabricating new ones is not.\n"
+        "  • If the data is fundamentally unrecoverable from itself, edit "
+        "pipeline.py to handle the drift, or submit_patch with a low "
+        "confidence note and escalate. Do NOT fake data to make tests pass.\n"
+        "  • Do not assume any baseline/reference exists." + extra,
         f"Diagnosis: {diag.get('reasoning', '')}. Fix it, then submit_patch.",
         PATCH_TOOLS,
         executor,

@@ -70,7 +70,14 @@ def _apply_fix(failure_type):
 
 
 def _ai_patch(bus, diag, feedback=None):
-    """Generative branch: the model reads the files and writes the fix itself."""
+    """Generative branch: the model reads the files and writes the fix itself.
+
+    Hard guards enforce the "no fabrication" rule on the data file:
+    patch can shrink, clean, clamp, dedupe — but never grow record count
+    or rewrite data from scratch when the source is unparseable. Forces
+    the model to edit pipeline.py or escalate in those cases."""
+
+    import json as _json
 
     def write_fn(path_str, content):
         target = next(
@@ -78,6 +85,33 @@ def _ai_patch(bus, diag, feedback=None):
         )
         if target is None:
             return f"refused: {path_str} not writable"
+        if target == DATA_FILE:
+            current = target.read_text() if target.exists() else ""
+            try:
+                cur = _json.loads(current)
+            except _json.JSONDecodeError:
+                return (
+                    "error: current data is unparseable. Do NOT rewrite the "
+                    "data file — edit pipeline.py to handle the new shape, "
+                    "or submit_patch with a low-confidence note to escalate."
+                )
+            try:
+                new = _json.loads(content)
+            except _json.JSONDecodeError:
+                return "error: proposed data content is not valid JSON."
+            if isinstance(cur, list) and isinstance(new, list):
+                if len(new) > len(cur):
+                    return (
+                        f"error: patch may not add records that weren't in "
+                        f"the source ({len(cur)} -> {len(new)}). Filtering, "
+                        f"cleaning, clamping is allowed; inventing rows is "
+                        f"not. Edit pipeline.py instead, or escalate."
+                    )
+            elif not isinstance(cur, list):
+                return (
+                    "error: current data is not a JSON list. Do not rewrite "
+                    "data — edit pipeline.py to handle the new shape."
+                )
         before = target.read_text() if target.exists() else None
         target.write_text(content)
         emit_file_change(bus, "patch", "heal", target, before, content)
