@@ -322,6 +322,12 @@ for pasting into a Claude conversation">🙂</button>
         <select id="tModelChaos"></select></label>
       <label>Patch model
         <select id="tModelPatch"></select></label>
+      <label>Dataset (JSON/JSONL/CSV)
+        <input id="uploadFile" type="file"
+          accept=".json,.jsonl,.ndjson,.csv,application/json,text/csv"
+          style="display:none">
+        <button class="btn" id="uploadBtn" type="button">choose file…</button>
+      </label>
       <div style="display:flex;align-items:center;gap:8px">
         <button class="btn" id="cfgApply">APPLY</button>
         <span id="cfgMsg"></span>
@@ -903,6 +909,34 @@ keyInput.addEventListener('keydown',e=>{
   if(e.key==='Enter'){const k=keyInput.value.trim();if(k)setMode('ai',k);}
 });
 document.getElementById('cfgApply').onclick=applyCfgClick;
+
+document.getElementById('uploadBtn').onclick=()=>
+  document.getElementById('uploadFile').click();
+document.getElementById('uploadFile').addEventListener('change', async e=>{
+  const f=e.target.files[0];
+  if(!f)return;
+  const btn=document.getElementById('uploadBtn');
+  btn.textContent='uploading…';
+  cfgMsg.textContent='';cfgMsg.className='';
+  try{
+    const fd=new FormData();fd.append('file',f);
+    const r=await fetch('/api/dataset/upload',{method:'POST',body:fd});
+    const j=await r.json();
+    if(r.ok){
+      btn.textContent=`✓ ${j.row_count} rows · ${j.field_count} fields`;
+      cfgMsg.className='ok';
+      cfgMsg.textContent=`loaded ${f.name}`;
+      setTimeout(()=>{btn.textContent='choose file…';cfgMsg.textContent='';},3000);
+    }else{
+      btn.textContent='choose file…';
+      cfgMsg.className='err';cfgMsg.textContent=j.error||'upload failed';
+    }
+  }catch(err){
+    btn.textContent='choose file…';
+    cfgMsg.className='err';cfgMsg.textContent='upload failed';
+  }
+  e.target.value='';
+});
 
 async function initStatus(){
   try{applyStatus(await(await fetch('/api/state')).json());}catch(e){}

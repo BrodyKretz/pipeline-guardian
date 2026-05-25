@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse, PlainTextResponse
 from pydantic import BaseModel
 
@@ -30,6 +30,7 @@ from db import init_db
 from restore import restore_all
 from state import EventBus
 from tools.data_profile import derive_profile, load_or_derive
+from tools.dataset_loader import parse_dataset
 
 # Where the compliance profile lives. Auto-derived from the current data
 # file on startup if absent. Phase 3 slice 2 will let users upload datasets
@@ -117,6 +118,8 @@ def _full_reset():
     bus.reset()
     llm.reset_token_usage()
     restore_all()
+    PROFILE_FILE.unlink(missing_ok=True)
+    load_or_derive(PROFILE_FILE, DATA_FILE)
     for p in INCIDENTS_DIR.glob("*.json"):  # incident files + summary.json
         p.unlink(missing_ok=True)
     DB_FILE.unlink(missing_ok=True)
@@ -183,9 +186,10 @@ async def lifespan(app: FastAPI):
     queue: asyncio.Queue = asyncio.Queue()
     bus.register_loop(loop, queue)
     restore_all()
+    # Re-derive profile from restored data so a prior uploaded dataset's
+    # profile doesn't outlive the data it described.
+    PROFILE_FILE.unlink(missing_ok=True)
     init_db()
-    # Phase 3 slice 1: derive the compliance profile from current data on
-    # startup if it doesn't exist yet. Persists to data/compliance.json.
     try:
         load_or_derive(PROFILE_FILE, DATA_FILE)
     except Exception as e:
@@ -365,6 +369,59 @@ def api_model(req: ModelReq):
         label = f"default model -> {req.model}"
     bus.emit("system", "system", "MODEL_CHANGED", label)
     return JSONResponse(_status())
+
+
+@app.post("/api/dataset/upload")
+async def api_dataset_upload(file: UploadFile = File(...)):
+    """Drop in any JSON/JSONL/CSV dataset; replace working data + re-derive
+    the compliance profile from it. Triggers a system event so the dashboard
+    can react. The previous data is overwritten — STOP if you want to undo
+    (server start reseeds the WEATHER baseline)."""
+    raw = await file.read()
+    try:
+        records = parse_dataset(raw, file.filename or "")
+    except (ValueError, json.JSONDecodeError) as e:
+        return JSONResponse(
+            {"ok": False, "error": f"parse failed: {e}"}, status_code=400
+        )
+    if not records:
+        return JSONResponse(
+            {"ok": False, "error": "dataset is empty"}, status_code=400
+        )
+    if not all(isinstance(r, dict) for r in records):
+        return JSONResponse(
+            {"ok": False, "error": "records must be flat dict rows"},
+            status_code=400,
+        )
+
+    DATA_FILE.parent.mkdir(parents=True, exist_ok=True)
+    DATA_FILE.write_text(json.dumps(records, indent=2))
+
+    profile = derive_profile(records)
+    PROFILE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PROFILE_FILE.write_text(json.dumps(profile, indent=2))
+
+    bus.emit(
+        "system",
+        "system",
+        "DATASET_LOADED",
+        f"Loaded {len(records)} records from {file.filename} "
+        f"({len(profile['fields'])} fields profiled).",
+        {
+            "row_count": len(records),
+            "field_count": len(profile["fields"]),
+            "filename": file.filename,
+        },
+    )
+    return JSONResponse(
+        {
+            "ok": True,
+            "filename": file.filename,
+            "row_count": len(records),
+            "field_count": len(profile["fields"]),
+            "fields": list(profile["fields"].keys()),
+        }
+    )
 
 
 @app.get("/api/profile")
