@@ -29,6 +29,12 @@ from config import (
 from db import init_db
 from restore import restore_all
 from state import EventBus
+from tools.data_profile import derive_profile, load_or_derive
+
+# Where the compliance profile lives. Auto-derived from the current data
+# file on startup if absent. Phase 3 slice 2 will let users upload datasets
+# that overwrite both the data file and this profile.
+PROFILE_FILE = ROOT / "data" / "compliance.json"
 
 bus = EventBus()
 scheduler = BackgroundScheduler()
@@ -85,7 +91,23 @@ def _status():
         "model_patch": llm.MODEL_PATCH,
         "models": MODELS,
         "tokens": dict(llm.TOKEN_USAGE),
+        "profile_fields": _profile_summary(),
     }
+
+
+def _profile_summary():
+    """Compact view of the compliance profile for the dashboard."""
+    try:
+        if not PROFILE_FILE.exists():
+            return None
+        prof = json.loads(PROFILE_FILE.read_text())
+        return {
+            "row_count": prof.get("row_count", 0),
+            "field_count": len(prof.get("fields", {})),
+            "fields": sorted(prof.get("fields", {}).keys()),
+        }
+    except Exception:
+        return None
 
 
 def _full_reset():
@@ -162,6 +184,12 @@ async def lifespan(app: FastAPI):
     bus.register_loop(loop, queue)
     restore_all()
     init_db()
+    # Phase 3 slice 1: derive the compliance profile from current data on
+    # startup if it doesn't exist yet. Persists to data/compliance.json.
+    try:
+        load_or_derive(PROFILE_FILE, DATA_FILE)
+    except Exception as e:
+        print(f"profile derivation skipped: {e}")
     task = asyncio.create_task(_broadcaster(queue))
     bus.emit("system", "system", "SYSTEM_STARTED", "Pipeline Guard online")
     if not os.getenv("PG_DISABLE_SCHEDULER"):
@@ -337,6 +365,18 @@ def api_model(req: ModelReq):
         label = f"default model -> {req.model}"
     bus.emit("system", "system", "MODEL_CHANGED", label)
     return JSONResponse(_status())
+
+
+@app.get("/api/profile")
+def api_profile():
+    """Full compliance profile — the contract every dataset agrees to.
+    AI-visible (unlike the baseline files)."""
+    if PROFILE_FILE.exists():
+        try:
+            return JSONResponse(json.loads(PROFILE_FILE.read_text()))
+        except json.JSONDecodeError:
+            pass
+    return JSONResponse({"row_count": 0, "fields": {}})
 
 
 @app.get("/api/incidents")

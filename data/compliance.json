@@ -1,0 +1,178 @@
+{
+  "row_count": 20,
+  "fields": {
+    "city": {
+      "type": "string",
+      "nullable": false,
+      "examples": [
+        "Boulder",
+        "Denver",
+        "Seattle"
+      ],
+      "min": null,
+      "max": null,
+      "enum": [
+        "Atlanta",
+        "Aurora",
+        "Austin",
+        "Boston",
+        "Boulder",
+        "Chicago",
+        "Cincinnati",
+        "Dallas",
+        "Denver",
+        "Detroit",
+        "Houston",
+        "Las Vegas",
+        "Miami",
+        "Minneapolis",
+        "Nashville",
+        "Phoenix",
+        "Portland",
+        "Seattle",
+        "Tucson",
+        "Tulsa"
+      ]
+    },
+    "station_id": {
+      "type": "string",
+      "nullable": false,
+      "examples": [
+        "STN-001",
+        "STN-002",
+        "STN-003"
+      ],
+      "min": null,
+      "max": null,
+      "enum": [
+        "STN-001",
+        "STN-002",
+        "STN-003",
+        "STN-004",
+        "STN-005",
+        "STN-006",
+        "STN-007",
+        "STN-008",
+        "STN-009",
+        "STN-010",
+        "STN-011",
+        "STN-012",
+        "STN-013",
+        "STN-014",
+        "STN-015",
+        "STN-016",
+        "STN-017",
+        "STN-018",
+        "STN-019",
+        "STN-020"
+      ]
+    },
+    "temp": {
+      "type": "number",
+      "nullable": false,
+      "examples": [
+        45.3,
+        65.5,
+        63.0
+      ],
+      "min": 20.9,
+      "max": 95.0
+    },
+    "humidity": {
+      "type": "integer",
+      "nullable": false,
+      "examples": [
+        29,
+        74,
+        17
+      ],
+      "min": 12,
+      "max": 85
+    },
+    "conditions": {
+      "type": "string",
+      "nullable": false,
+      "examples": [
+        "rain",
+        "cloudy",
+        "fog"
+      ],
+      "min": null,
+      "max": null,
+      "enum": [
+        "clear",
+        "cloudy",
+        "fog",
+        "partly_cloudy",
+        "rain",
+        "snow",
+        "storm"
+      ]
+    },
+    "wind_speed": {
+      "type": "number",
+      "nullable": false,
+      "examples": [
+        16.3,
+        0.9,
+        14.1
+      ],
+      "min": 0.9,
+      "max": 21.9
+    },
+    "wind_direction": {
+      "type": "string",
+      "nullable": false,
+      "examples": [
+        "NE",
+        "W",
+        "SE"
+      ],
+      "min": null,
+      "max": null,
+      "enum": [
+        "E",
+        "N",
+        "NE",
+        "NW",
+        "S",
+        "SE",
+        "SW",
+        "W"
+      ]
+    },
+    "pressure": {
+      "type": "number",
+      "nullable": false,
+      "examples": [
+        1023.7,
+        1009.6,
+        1017.1
+      ],
+      "min": 996.6,
+      "max": 1027.7
+    },
+    "precipitation": {
+      "type": "number",
+      "nullable": false,
+      "examples": [
+        0.04,
+        0.1,
+        0.23
+      ],
+      "min": 0.03,
+      "max": 0.39
+    },
+    "timestamp": {
+      "type": "iso8601",
+      "nullable": false,
+      "examples": [
+        "2026-05-17T08:00:00",
+        "2026-05-17T09:00:00",
+        "2026-05-17T10:00:00"
+      ],
+      "min": null,
+      "max": null
+    }
+  }
+}
