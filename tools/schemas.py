@@ -16,6 +16,15 @@ READ_TOOLS = [
         "description": "Read the raw pipeline.py source.",
         "input_schema": {"type": "object", "properties": {}},
     },
+    {
+        "name": "read_profile",
+        "description": (
+            "Read the full compliance profile JSON. The profile is the "
+            "contract the data must satisfy: types, nullability, numeric "
+            "ranges, string enums per field. Use this for the exact spec."
+        ),
+        "input_schema": {"type": "object", "properties": {}},
+    },
 ]
 
 CHAOS_TOOLS = READ_TOOLS + [

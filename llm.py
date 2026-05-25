@@ -203,11 +203,52 @@ from tools.schemas import (  # noqa: E402
 )
 
 
+_PROFILE_FILE = DATA_FILE.parent / "compliance.json"
+
+
+def _load_profile():
+    if not _PROFILE_FILE.exists():
+        return {}
+    try:
+        return json.loads(_PROFILE_FILE.read_text())
+    except Exception:
+        return {}
+
+
+def _profile_summary_text():
+    """Compact human-readable view of the compliance profile, embedded in
+    every AI agent's system prompt. ~150 tokens for a 10-field dataset."""
+    p = _load_profile()
+    fields = p.get("fields") or {}
+    if not fields:
+        return ""
+    lines = [
+        "=== COMPLIANCE PROFILE — the contract the data MUST satisfy ===",
+        f"{p.get('row_count', 0)} records, {len(fields)} fields:",
+    ]
+    for name, spec in fields.items():
+        bits = [spec.get("type") or "unknown"]
+        if spec.get("nullable"):
+            bits.append("nullable")
+        if spec.get("enum"):
+            enum_vals = spec["enum"]
+            shown = ",".join(map(str, enum_vals[:10]))
+            if len(enum_vals) > 10:
+                shown += ",…"
+            bits.append(f"enum=[{shown}]")
+        elif spec.get("min") is not None:
+            bits.append(f"min={spec['min']} max={spec['max']}")
+        lines.append(f"  • {name}: {', '.join(bits)}")
+    return "\n".join(lines) + "\n"
+
+
 def _read_tool(name):
     if name == "read_data":
         return DATA_FILE.read_text() if DATA_FILE.exists() else "<missing>"
     if name == "read_pipeline":
         return PIPELINE_FILE.read_text()
+    if name == "read_profile":
+        return _load_profile() or {"error": "no compliance profile found"}
     return {"error": "unknown tool"}
 
 
@@ -252,10 +293,15 @@ def generate_sabotage(write_fn, recent_notes=None, category=None):
         )
 
     _anthropic_tool_loop(
-        "You simulate REALISTIC upstream failures in a weather data feed — the "
-        "kind that actually happen in production ETLs when a vendor API changes "
-        "or a sensor misbehaves. Mutate data/weather_source.json in ONE small "
+        _profile_summary_text() +
+        "\nYou simulate REALISTIC upstream failures in a data feed — the kind "
+        "that actually happen in production ETLs when a vendor API changes or "
+        "a sensor misbehaves. Mutate data/weather_source.json in ONE small "
         "way. INVENT the specifics yourself — do not echo familiar examples.\n\n"
+        "The data CURRENTLY MATCHES the profile above. A realistic chaos "
+        "mutation should VIOLATE the profile in exactly ONE specific way: "
+        "drop a required field, change a type, exceed a numeric range, "
+        "introduce a non-enum value, etc.\n\n"
         "Pick ONE abstract failure class and invent your own concrete variant:\n"
         "  • schema_drift — a field is renamed, dropped, or added\n"
         "  • type_drift — a field's runtime type shifts\n"
@@ -337,10 +383,13 @@ def diagnose(pipeline_error):
         }
     try:
         return _anthropic_tool_loop(
-            "You diagnose data-pipeline failures. Read the data and the "
-            "pipeline source, reason about the root cause in your own words, "
-            "then submit_diagnosis. `failure_type` is a short free-text label "
-            "you choose (not from a fixed list). Base it on what you observe.",
+            _profile_summary_text() +
+            "\nYou diagnose data-pipeline failures. The profile above is what "
+            "compliant data looks like. Read the data + pipeline source, "
+            "identify how the data violates the profile (or what code path "
+            "broke), and submit_diagnosis. `failure_type` is a short free-"
+            "text label you choose (not from a fixed list). Base it on what "
+            "you observe in the actual files, not on guesses.",
             f"The pipeline failed with error:\n{pipeline_error}\n\n"
             "Investigate the files and submit your diagnosis.",
             DIAGNOSE_TOOLS,
@@ -384,9 +433,11 @@ def generate_patch(diag, write_fn, feedback=None, recent_fixes=None):
             history_block += f"  {i}. {short}\n"
 
     return _anthropic_tool_loop(
-        "You are a data engineer healing a broken ETL. You don't own the "
-        "upstream feed — you only own the pipeline. Choose the realistic "
-        "fix for the problem class:\n\n"
+        _profile_summary_text() +
+        "\nYou are a data engineer healing a broken ETL. The profile above "
+        "is the contract: the data must conform to it after your fix. You "
+        "don't own the upstream feed — you only own the pipeline. Choose "
+        "the realistic fix for the problem class:\n\n"
         "  • Schema drift (renamed/added/removed column) → edit pipeline.py "
         "to read the new shape with a tolerant fallback. NEVER tell the "
         "source to rename it back. If a critical column is truly missing, "
@@ -437,20 +488,19 @@ def judge_output():
         return _read_tool(name)
 
     return _anthropic_tool_loop(
-        "You validate a weather ETL's output. Run it via run_output, then judge "
-        "whether the output is STRUCTURALLY clean: every row has the same keys, "
-        "types are consistent, no nulls, row count is non-zero, and every value "
-        "passes the pipeline's own range/enum guards.\n\n"
+        _profile_summary_text() +
+        "\nYou validate an ETL's output against the compliance profile above. "
+        "Run it via run_output, then judge whether every row conforms: same "
+        "keys as the profile, types match, ranges/enums respected, nulls "
+        "only where the profile allows them, row count non-zero.\n\n"
         "STRICT RULES:\n"
-        "  • You ONLY judge structural / type / schema / range integrity.\n"
-        "  • You DO NOT judge meteorological or real-world plausibility. If a "
-        "row says Miami had snow at 28°F, or rain at sub-freezing temperatures, "
-        "or any other 'weird-looking weather' combination — that is NOT a "
-        "pipeline failure. The pipeline's job is to transform and validate "
-        "fields, not to fact-check the weather. Pass those outputs.\n"
-        "  • If pipeline.run() returns success=True with no errors and rows>0, "
-        "and the rows are structurally uniform — pass it. Semantic weirdness "
-        "in the source values is the upstream's problem, not the ETL's.",
+        "  • You ONLY judge profile compliance (types / schema / ranges / "
+        "enums / nullability).\n"
+        "  • You DO NOT judge semantic / real-world / domain plausibility. "
+        "If the profile allows it, the data is valid — period. (No fact-"
+        "checking weather, music genres, transaction amounts, etc.)\n"
+        "  • If pipeline.run() returns success=True with rows>0 and every "
+        "row conforms to the profile — pass it. Conformance is the bar.",
         "Validate the current pipeline output.",
         VALIDATE_TOOLS,
         executor,
