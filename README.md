@@ -8,6 +8,19 @@ In **mock mode** the same architecture runs on a deterministic 7-enum path. No A
 
 ---
 
+## Drop in any dataset
+
+The pipeline is dataset-agnostic. Hit the "choose file…" button in the *Agent Timing* panel and upload any `.json`, `.jsonl`, or `.csv` — songs, transactions, sensor readings, anything. The system:
+
+1. Parses it (handles JSON arrays, envelope dicts like `{data: [...]}`, JSONL lines, CSV with numeric coercion).
+2. **Derives a compliance profile** at ingest: per-field type, nullability, observed min/max, string enums (when small enough).
+3. Saves the records + profile to disk; subsequent pipeline runs validate against that profile.
+4. **Surfaces the profile to every AI agent** in its system prompt — chaos drifts from it, patch heals toward it, validator enforces it. The profile is AI-visible (unlike the baseline).
+
+The default 20-record weather dataset is what ships with the repo; uploading replaces it. Click STOP or restart to reseed the weather baseline.
+
+---
+
 ## What you see
 
 ```
