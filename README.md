@@ -1,4 +1,4 @@
-# 🛡️ Pipeline Guard
+# Pipeline Guard
 
 **A multi-agent self-healing data pipeline. Chaos breaks it. Five other agents detect, diagnose, repair, validate, and log every break — live, on a dashboard you can watch.**
 
@@ -35,20 +35,20 @@ The default 20-record weather dataset is what ships with the repo; uploading rep
                               ▼
                   data/weather_source.json
                               │
-   MONITOR 👁  every 15–60s ──┘ runs pipeline.py in a subprocess
+   MONITOR   every 15–60s ──┘ runs pipeline.py in a subprocess
         │ failure / row-count anomaly
         ▼
-   DIAGNOSIS 🔍 reads both files; submits free-form root cause + confidence
+   DIAGNOSIS  reads both files; submits free-form root cause + confidence
         │ <0.60 → escalate
         ▼
-   PATCH 🔧 reads files (NOT baseline); writes a defensive fix to pipeline.py
+   PATCH  reads files (NOT baseline); writes a defensive fix to pipeline.py
         │      or cleans/clamps existing data. Never invents records.
         │      Can dry_run + retry once with validator feedback.
         ▼
    VALIDATOR ✓ re-runs the pipeline; judges output structural integrity
         │ pass / fail
         ▼
-   REPORTER 📋 logs the incident (no baseline restore — heals persist)
+   REPORTER  logs the incident (no baseline restore — heals persist)
 ```
 
 **Heals accumulate.** When patch widens `pipeline.py` to handle `temperature` *or* `temp`, that widening stays. The next chaos round meets a more robust pipeline. Over a long demo you watch the system genuinely learn.
@@ -90,7 +90,7 @@ A single-file vanilla-JS dashboard at `dashboard/index.html`. Two views toggled 
 - ⚡ CHAOS button + category dropdown (fire chaos on demand, optionally biased to schema/type/format/encoding/value/volume/unit/structural drift)
 - MOCK / AI mode toggle
 - GRAPH / FILES view toggle
-- 🙂 export button — copies a markdown session dump (events, files, incidents, current state) to your clipboard for pasting into a Claude conversation
+-  export button — copies a markdown session dump (events, files, incidents, current state) to your clipboard for pasting into a Claude conversation
 - Live counters: uptime, incidents, resolution rate, tokens (in/out) + cost estimate
 
 ---
