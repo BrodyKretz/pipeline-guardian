@@ -86,8 +86,8 @@ A single-file vanilla-JS dashboard at `dashboard/index.html`. Two views toggled 
 **FILES view** — `data/weather_source.json` and `pipeline.py` shown side-by-side, with **per-agent colored diffs**. Damage flashes red, heals flash in the patching agent's color, restores go neutral. Unhealed damage persists visibly. A small *Pipeline State* panel on the left shows the current incident state in one glance.
 
 **Top-bar controls** include:
-- ▶ Start / ⏸ Pause / ⏹ Stop (Stop is the explicit full reset)
-- ⚡ CHAOS button + category dropdown (fire chaos on demand, optionally biased to schema/type/format/encoding/value/volume/unit/structural drift)
+-  Start /  Pause /  Stop (Stop is the explicit full reset)
+- CHAOS button + category dropdown (fire chaos on demand, optionally biased to schema/type/format/encoding/value/volume/unit/structural drift)
 - MOCK / AI mode toggle
 - GRAPH / FILES view toggle
 -  export button — copies a markdown session dump (events, files, incidents, current state) to your clipboard for pasting into a Claude conversation
